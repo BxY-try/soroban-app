@@ -39,7 +39,7 @@ class _PracticeScreenState extends State<PracticeScreen> {
       backgroundColor: SorobanTheme.backgroundColor,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
           child: Column(
             children: [
               // Top Strip
@@ -160,36 +160,36 @@ class _PracticeScreenState extends State<PracticeScreen> {
                 ),
               ),
 
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
 
-              // Big Soroban Focal Point (75-80% height)
+              // Big Soroban Focal Point (Expanded)
               const Expanded(
                 child: Center(
                   child: AspectRatio(
-                    aspectRatio: 2.8,
+                    aspectRatio: 2.1,
                     child: SorobanView(),
                   ),
                 ),
               ),
 
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
 
-              // Bottom Strip: 3 Icon-only buttons
+              // Compact Bottom Strip: 3 Icon-only buttons
               SizedBox(
-                height: 48,
+                height: 36,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Replay
+                    // 1. Reset / Retri
                     _buildControlButton(
-                      icon: Icons.replay_rounded,
-                      tooltip: 'Replay langkah digit ini',
-                      enabled: !controller.isAnimating && controller.activeCheckpointIndex > 0,
-                      onPressed: () => controller.executeReplay(),
+                      icon: Icons.restart_alt_rounded,
+                      tooltip: 'Retri (Kembali ke checkpoint sebelumnya)',
+                      enabled: controller.canReset,
+                      onPressed: () => controller.executeReset(),
                     ),
-                    const SizedBox(width: 32),
+                    const SizedBox(width: 20),
 
-                    // Hint
+                    // 2. Hint
                     _buildControlButton(
                       icon: Icons.lightbulb_rounded,
                       tooltip: 'Hint digit berikutnya',
@@ -199,14 +199,14 @@ class _PracticeScreenState extends State<PracticeScreen> {
                           controller.activeCheckpointIndex < problem.checkpoints.length,
                       onPressed: () => controller.executeHint(),
                     ),
-                    const SizedBox(width: 32),
+                    const SizedBox(width: 20),
 
-                    // Reset
+                    // 3. Replay Hint
                     _buildControlButton(
-                      icon: Icons.restart_alt_rounded,
-                      tooltip: 'Reset ke awal digit aktif',
-                      enabled: !controller.isAnimating,
-                      onPressed: () => controller.executeReset(),
+                      icon: Icons.repeat_rounded,
+                      tooltip: 'Replay Hint (Putar ulang animasi langkah digit ini)',
+                      enabled: controller.canReplay,
+                      onPressed: () => controller.executeReplay(),
                     ),
                   ],
                 ),
@@ -232,16 +232,16 @@ class _PracticeScreenState extends State<PracticeScreen> {
         color: isPrimary
             ? (enabled ? SorobanTheme.beadActiveColor : Colors.grey.shade400)
             : (enabled ? SorobanTheme.frameColor : Colors.grey.shade400),
-        borderRadius: BorderRadius.circular(24),
-        elevation: enabled ? (isPrimary ? 4 : 2) : 0,
+        borderRadius: BorderRadius.circular(18),
+        elevation: enabled ? (isPrimary ? 2 : 1) : 0,
         child: InkWell(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(18),
           onTap: enabled ? onPressed : null,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
             child: Icon(
               icon,
-              size: 26,
+              size: 18,
               color: isPrimary ? SorobanTheme.frameColor : SorobanTheme.backgroundColor,
             ),
           ),

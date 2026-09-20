@@ -55,9 +55,9 @@ void main() {
 
     expect(find.byType(SorobanView), findsOneWidget);
 
-    // 3 Icon-only buttons: Replay, Hint, Reset
-    expect(find.byIcon(Icons.replay_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.lightbulb_rounded), findsOneWidget);
+    // 3 Icon-only buttons: Reset/Retri, Hint, Replay Hint
     expect(find.byIcon(Icons.restart_alt_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.lightbulb_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.repeat_rounded), findsOneWidget);
   });
 }

@@ -36,7 +36,7 @@ class BeadMove {
     required this.kind,
     required this.from,
     required this.to,
-    this.delay = const Duration(milliseconds: 350),
+    this.delay = const Duration(milliseconds: 550),
     this.description,
   });
 

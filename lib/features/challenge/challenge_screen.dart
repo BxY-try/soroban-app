@@ -36,27 +36,27 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
       backgroundColor: SorobanTheme.backgroundColor,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
           child: Column(
             children: [
-              // 1. Thin Top Strip (~12% height)
+              // 1. Thin Top Strip
               _buildTopStrip(context, controller),
 
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
 
-              // 2. Big Soroban Focal Point (~75-80% height)
+              // 2. Big Soroban Focal Point (Expanded with large aspect ratio)
               const Expanded(
                 child: Center(
                   child: AspectRatio(
-                    aspectRatio: 2.8, // Ideal widescreen aspect ratio for 7 rods
+                    aspectRatio: 2.1, // Expanded widescreen aspect ratio for larger beads
                     child: SorobanView(),
                   ),
                 ),
               ),
 
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
 
-              // 3. Thin Bottom Strip (~12% height)
+              // 3. Compact Bottom Strip
               _buildBottomStrip(context, controller),
             ],
           ),
@@ -187,28 +187,29 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
   }
 
   /// Bottom strip: 3 icon-only buttons as specified in §5
+  /// Bottom strip: 3 compact icon-only control buttons
   Widget _buildBottomStrip(BuildContext context, SorobanController controller) {
     final bool isAnimating = controller.isAnimating;
 
     return SizedBox(
-      height: 48,
+      height: 36,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // 1. Replay Button (🔁)
+          // 1. Reset / Retri Button (↺)
           _buildControlButton(
-            icon: Icons.replay_rounded,
-            tooltip: 'Replay (Ulangi peragaan langkah digit ini)',
-            enabled: !isAnimating && controller.activeCheckpointIndex > 0,
-            onPressed: () => controller.executeReplay(),
+            icon: Icons.restart_alt_rounded,
+            tooltip: 'Retri (Kembali ke checkpoint sebelumnya)',
+            enabled: controller.canReset,
+            onPressed: () => controller.executeReset(),
           ),
 
-          const SizedBox(width: 32),
+          const SizedBox(width: 20),
 
           // 2. Hint Button (💡)
           _buildControlButton(
             icon: Icons.lightbulb_rounded,
-            tooltip: 'Hint (Jalankan animasi berantai digit berikutnya)',
+            tooltip: 'Hint (Jalankan animasi langkah berikutnya)',
             isPrimary: true,
             enabled: !isAnimating &&
                 controller.currentProblem != null &&
@@ -217,14 +218,14 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
             onPressed: () => controller.executeHint(),
           ),
 
-          const SizedBox(width: 32),
+          const SizedBox(width: 20),
 
-          // 3. Reset Button (↺)
+          // 3. Replay Hint Button (🔁)
           _buildControlButton(
-            icon: Icons.restart_alt_rounded,
-            tooltip: 'Reset (Kembalikan ke awal digit yang sedang aktif)',
-            enabled: !isAnimating,
-            onPressed: () => controller.executeReset(),
+            icon: Icons.repeat_rounded,
+            tooltip: 'Replay Hint (Putar ulang animasi langkah digit ini)',
+            enabled: controller.canReplay,
+            onPressed: () => controller.executeReplay(),
           ),
         ],
       ),
@@ -245,16 +246,16 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
         color: isPrimary
             ? (enabled ? SorobanTheme.beadActiveColor : Colors.grey.shade400)
             : (enabled ? SorobanTheme.frameColor : Colors.grey.shade400),
-        borderRadius: BorderRadius.circular(24),
-        elevation: enabled ? (isPrimary ? 4 : 2) : 0,
+        borderRadius: BorderRadius.circular(18),
+        elevation: enabled ? (isPrimary ? 2 : 1) : 0,
         child: InkWell(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(18),
           onTap: enabled ? onPressed : null,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
             child: Icon(
               icon,
-              size: 26,
+              size: 18,
               color: isPrimary ? SorobanTheme.frameColor : SorobanTheme.backgroundColor,
             ),
           ),

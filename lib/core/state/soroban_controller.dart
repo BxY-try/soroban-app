@@ -67,6 +67,11 @@ class SorobanController extends ChangeNotifier {
   final Map<String, DateTime> _trailBeads = {};
   Map<String, DateTime> get trailBeads => Map.unmodifiable(_trailBeads);
 
+  // --- Hint Execution Tracking (for Replay gating) ---
+  /// Tracks the checkpoint index of the last successfully executed hint.
+  /// null means no hint has been executed yet for the current problem/checkpoint.
+  int? _lastHintCheckpointIndex;
+
   // --- Settings & Records ---
   bool _perRodColor = false;
   bool get perRodColor => _perRodColor;
@@ -163,6 +168,7 @@ class SorobanController extends ChangeNotifier {
     _activeCheckpointIndex = 0;
     _trailBeads.clear();
     _animatingBeadKey = null;
+    _lastHintCheckpointIndex = null;
     notifyListeners();
   }
 
@@ -252,6 +258,15 @@ class SorobanController extends ChangeNotifier {
     }
   }
 
+  bool get canReset =>
+      !_isAnimating && (_activeCheckpointIndex > 0 || _state.value != 0);
+
+  /// Replay is only available when a hint has been executed at least once.
+  bool get canReplay =>
+      !_isAnimating &&
+      _currentProblem != null &&
+      _lastHintCheckpointIndex != null;
+
   // --- Hint Execution (Chained Animation) ---
   Future<void> executeHint() async {
     if (_isAnimating || _currentProblem == null) return;
@@ -267,17 +282,27 @@ class SorobanController extends ChangeNotifier {
     _isAnimating = true;
     notifyListeners();
 
-    // If recovering from divergence, restore valid snapshot first
+    // If recovering from divergence, restore valid snapshot gradually rod-by-rod
     if (hintResult.recoveredFromDivergence) {
-      _state = hintResult.fromState.clone();
-      notifyListeners();
-      await Future.delayed(const Duration(milliseconds: 200));
+      await _smoothRecoverDivergence(hintResult.fromState);
     }
+
+    // Brief pause before starting the hint animation so user notices it's about to begin
+    await Future.delayed(const Duration(milliseconds: 400));
 
     await _playChainedMoves(hintResult.moves);
 
-    _checkpointSnapshots.add(_state.clone());
-    _activeCheckpointIndex = hintResult.checkpointIndex + 1;
+    // Track hint execution for Replay gating
+    _lastHintCheckpointIndex = hintResult.checkpointIndex;
+
+    // Sync snapshot without duplicates
+    final newIdx = hintResult.checkpointIndex + 1;
+    if (_checkpointSnapshots.length <= newIdx) {
+      _checkpointSnapshots.add(_state.clone());
+    } else {
+      _checkpointSnapshots[newIdx] = _state.clone();
+    }
+    _activeCheckpointIndex = newIdx;
     _animatingBeadKey = null;
     _isAnimating = false;
 
@@ -292,10 +317,9 @@ class SorobanController extends ChangeNotifier {
   Future<void> executeReplay() async {
     if (_isAnimating || _currentProblem == null) return;
     if (_currentProblem!.checkpoints.isEmpty) return;
+    if (_lastHintCheckpointIndex == null) return;
 
-    final replayIdx = (_activeCheckpointIndex > 0)
-        ? _activeCheckpointIndex - 1
-        : 0;
+    final replayIdx = _lastHintCheckpointIndex!;
 
     final replayResult = hintEngine.getReplay(
       activeCheckpointIndex: replayIdx,
@@ -311,13 +335,19 @@ class SorobanController extends ChangeNotifier {
     _activeCheckpointIndex = replayIdx;
     notifyListeners();
 
-    await Future.delayed(const Duration(milliseconds: 300));
+    await Future.delayed(const Duration(milliseconds: 400));
 
     // 2. Play chained animation again
     await _playChainedMoves(replayResult.moves);
 
-    _checkpointSnapshots.add(_state.clone());
-    _activeCheckpointIndex = replayIdx + 1;
+    // Update snapshot without duplicating
+    final targetIdx = replayIdx + 1;
+    if (_checkpointSnapshots.length <= targetIdx) {
+      _checkpointSnapshots.add(_state.clone());
+    } else {
+      _checkpointSnapshots[targetIdx] = _state.clone();
+    }
+    _activeCheckpointIndex = targetIdx;
     _animatingBeadKey = null;
     _isAnimating = false;
 
@@ -329,15 +359,83 @@ class SorobanController extends ChangeNotifier {
   }
 
   // --- Reset Execution ---
+  /// Mengembalikan posisi sempoa:
+  /// 1. Jika manik sedang salah/divergen dari awal checkpoint aktif: kembalikan ke awal checkpoint aktif.
+  /// 2. Jika posisi manik sudah di awal checkpoint aktif (atau ditekan lagi): kembali ke checkpoint sebelumnya ("retri").
   void executeReset() {
     if (_isAnimating) return;
-    // Balikkan state ke snapshot checkpoint terakhir yang valid
-    if (_checkpointSnapshots.isNotEmpty) {
+    if (_checkpointSnapshots.isEmpty) return;
+
+    // 1. Jika manik telah digerakkan dan tidak sama dengan snapshot awal digit aktif:
+    if (_state.value != _checkpointSnapshots.last.value) {
       _state = _checkpointSnapshots.last.clone();
       _trailBeads.clear();
       _animatingBeadKey = null;
       notifyListeners();
+      return;
     }
+
+    // 2. Jika manik sudah pas di snapshot awal digit aktif, mundur ke checkpoint sebelumnya:
+    if (_checkpointSnapshots.length > 1 && _activeCheckpointIndex > 0) {
+      _checkpointSnapshots.removeLast();
+      _activeCheckpointIndex--;
+      _state = _checkpointSnapshots.last.clone();
+      _trailBeads.clear();
+      _animatingBeadKey = null;
+      // Reset hint tracking when going back to a previous checkpoint
+      _lastHintCheckpointIndex = null;
+      notifyListeners();
+    }
+  }
+
+  /// Smoothly recovers from divergence by restoring each divergent rod one-by-one
+  /// with brass glow and delay, so the user can see exactly which rods were wrong.
+  /// After all rods are restored, an extra pause gives the user time to register
+  /// the correct position before the hint animation begins.
+  Future<void> _smoothRecoverDivergence(SorobanState validState) async {
+    final totalRods = _state.rods.length;
+
+    // Collect indices of rods that differ from the valid state
+    final divergentRods = <int>[];
+    for (int i = 0; i < totalRods; i++) {
+      if (i < validState.rods.length && _state.rods[i] != validState.rods[i]) {
+        divergentRods.add(i);
+      }
+    }
+
+    if (divergentRods.isEmpty) {
+      // No divergence, just set the state
+      _state = validState.clone();
+      notifyListeners();
+      return;
+    }
+
+    // Restore each divergent rod one at a time with visual feedback
+    for (int i = 0; i < divergentRods.length; i++) {
+      final rodIdx = divergentRods[i];
+      final validRod = validState.rods[rodIdx];
+
+      // Show brass glow on this rod's beads during recovery
+      if (validRod.heaven != _state.rods[rodIdx].heaven) {
+        _animatingBeadKey = 'rod_${rodIdx}_heaven';
+      } else {
+        _animatingBeadKey = 'rod_${rodIdx}_earth_${validRod.earth}';
+      }
+
+      // Apply the correction for this rod
+      _state = _state.updateRod(rodIdx, validRod);
+      notifyListeners();
+
+      // Delay between each rod correction for visual clarity
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
+
+    _animatingBeadKey = null;
+    notifyListeners();
+
+    // Extra pause after all rods are corrected, before hint starts
+    // This lets the user register the correct position
+    await Future.delayed(const Duration(milliseconds: 600));
   }
 
   /// Plays a sequence of atomic moves with brass glow and inter-move delay.
