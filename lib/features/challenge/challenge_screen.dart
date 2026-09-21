@@ -7,10 +7,9 @@ import '../soroban_widget/soroban_view.dart';
 import 'result_screen.dart';
 
 /// The core exercise & challenge screen.
-/// Implements the landscape layout:
-/// - Thin top strip: problem text + timer + settings.
-/// - Big Soroban: occupies central focal point.
-/// - Thin bottom strip: control button Reset (↺).
+/// Implements the compact landscape layout:
+/// - Top strip: Back button (left), Centered Problem text (center), Settings (right).
+/// - Main area: Left panel (problem number, timer, reset) + Central Soroban.
 class ChallengeScreen extends StatefulWidget {
   const ChallengeScreen({super.key});
 
@@ -42,28 +41,35 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
         backgroundColor: SorobanTheme.backgroundColor,
         body: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+            padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
             child: Column(
               children: [
-                // 1. Thin Top Strip
+                // 1. Top Strip
                 _buildTopStrip(context, controller),
 
                 const SizedBox(height: 4),
 
-                // 2. Big Soroban Focal Point (Expanded with large aspect ratio)
-                const Expanded(
-                  child: Center(
-                    child: AspectRatio(
-                      aspectRatio: 2.1, // Expanded widescreen aspect ratio for larger beads
-                      child: SorobanView(),
-                    ),
+                // 2. Main Area: Left panel + Soroban focal point
+                Expanded(
+                  child: Row(
+                    children: [
+                      // Left Panel (underneath "Kembali ke App" button)
+                      _buildLeftPanel(context, controller),
+
+                      const SizedBox(width: 8),
+
+                      // Soroban Focal Point (Expanded widescreen)
+                      const Expanded(
+                        child: Center(
+                          child: AspectRatio(
+                            aspectRatio: 2.1,
+                            child: SorobanView(),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-
-                const SizedBox(height: 4),
-
-                // 3. Compact Bottom Strip
-                _buildBottomStrip(context, controller),
               ],
             ),
           ),
@@ -118,73 +124,60 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
     }
   }
 
-  /// Top strip: problem text with tabular monospace figures, checkpoint breadcrumbs, timer, settings
+  /// Top strip:
+  /// - Left: Back button ("Kembali ke App")
+  /// - Center: Centered problem equation
+  /// - Right: Settings button
   Widget _buildTopStrip(BuildContext context, SorobanController controller) {
+    const leftPanelWidth = 56.0;
     return SizedBox(
-      height: 44,
-      child: Row(
+      height: 38,
+      child: Stack(
         children: [
           // Back button
-          IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, size: 24),
-            tooltip: 'Kembali',
-            onPressed: () => _confirmExit(context, controller),
-          ),
-
-          const SizedBox(width: 8),
-
-          // Problem progress indicator (e.g. [1/5]) if challenge mode
-          if (controller.isChallengeMode)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: SorobanTheme.frameColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                '${controller.challengeIndex + 1}/${controller.totalChallengeProblems}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  color: SorobanTheme.textDark,
-                ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SizedBox(
+              width: leftPanelWidth,
+              child: IconButton(
+                icon: const Icon(Icons.arrow_back_rounded, size: 22),
+                tooltip: 'Kembali ke App',
+                onPressed: () => _confirmExit(context, controller),
               ),
             ),
-
-          const SizedBox(width: 12),
-
-          // Problem text with checkpoint breadcrumbs
-          Expanded(
-            child: _buildProblemText(controller),
           ),
 
-          // Timer (if challenge mode)
-          if (controller.isChallengeMode) ...[
-            const Icon(Icons.timer_outlined, size: 20, color: SorobanTheme.textDark),
-            const SizedBox(width: 4),
-            Text(
-              _formatTime(controller.elapsedMilliseconds),
-              style: SorobanTheme.timerStyle,
+          // Problem text (centered in display area)
+          Positioned.fill(
+            left: leftPanelWidth + 8,
+            right: leftPanelWidth + 8,
+            child: Center(
+              child: _buildProblemText(controller),
             ),
-            const SizedBox(width: 16),
-          ],
+          ),
 
           // Settings button
-          IconButton(
-            icon: const Icon(Icons.settings_outlined, size: 24),
-            tooltip: 'Pengaturan',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-            },
+          Align(
+            alignment: Alignment.centerRight,
+            child: SizedBox(
+              width: leftPanelWidth,
+              child: IconButton(
+                icon: const Icon(Icons.settings_outlined, size: 22),
+                tooltip: 'Pengaturan',
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  );
+                },
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  /// Displays the mathematical problem equation
+  /// Displays the mathematical problem equation, centered with a slightly smaller font size
   Widget _buildProblemText(SorobanController controller) {
     final problem = controller.currentProblem;
     if (problem == null) return const SizedBox.shrink();
@@ -193,55 +186,137 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
       scrollDirection: Axis.horizontal,
       child: Text(
         problem.displayText,
-        style: SorobanTheme.monospaceDigitStyle.copyWith(fontSize: 26),
+        textAlign: TextAlign.center,
+        style: SorobanTheme.monospaceDigitStyle.copyWith(fontSize: 20),
       ),
     );
   }
 
-  /// Bottom strip: compact icon-only control button (Reset / Retri)
-  Widget _buildBottomStrip(BuildContext context, SorobanController controller) {
+  /// Left panel under "Kembali ke App" button:
+  /// - Problem progress indicator (e.g. [1/5])
+  /// - Elapsed time (Timer)
+  /// - Reset button (↺)
+  Widget _buildLeftPanel(BuildContext context, SorobanController controller) {
+    const panelWidth = 56.0;
     return SizedBox(
-      height: 36,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Reset / Retri Button (↺)
-          _buildControlButton(
-            icon: Icons.restart_alt_rounded,
-            tooltip: 'Retri (Kembali ke checkpoint sebelumnya)',
-            enabled: controller.canReset,
-            onPressed: () => controller.executeReset(),
+      width: panelWidth,
+      child: Center(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Problem progress indicator
+              if (controller.isChallengeMode) ...[
+                Container(
+                  width: panelWidth,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  decoration: BoxDecoration(
+                    color: SorobanTheme.frameColor.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: SorobanTheme.frameColor.withValues(alpha: 0.15),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'SOAL',
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.5,
+                          color: SorobanTheme.textMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        '${controller.challengeIndex + 1}/${controller.totalChallengeProblems}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: SorobanTheme.textDark,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                // Timer info
+                Container(
+                  width: panelWidth,
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  decoration: BoxDecoration(
+                    color: SorobanTheme.frameColor.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: SorobanTheme.frameColor.withValues(alpha: 0.15),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.timer_outlined,
+                        size: 15,
+                        color: SorobanTheme.textMuted,
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        _formatTime(controller.elapsedMilliseconds),
+                        style: SorobanTheme.timerStyle.copyWith(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+
+              // Reset / Retri button
+              _buildResetButton(controller, panelWidth),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildControlButton({
-    required IconData icon,
-    required String tooltip,
-    required bool enabled,
-    required VoidCallback onPressed,
-    bool isPrimary = false,
-  }) {
+  /// Compact Reset / Retri button (↺) positioned in the left panel
+  Widget _buildResetButton(SorobanController controller, double width) {
+    final enabled = controller.canReset;
     return Tooltip(
-      message: tooltip,
+      message: 'Retri (Kembali ke checkpoint sebelumnya)',
       waitDuration: const Duration(milliseconds: 300),
       child: Material(
-        color: isPrimary
-            ? (enabled ? SorobanTheme.beadActiveColor : Colors.grey.shade400)
-            : (enabled ? SorobanTheme.frameColor : Colors.grey.shade400),
-        borderRadius: BorderRadius.circular(18),
-        elevation: enabled ? (isPrimary ? 2 : 1) : 0,
+        color: enabled ? SorobanTheme.frameColor : Colors.grey.shade400,
+        borderRadius: BorderRadius.circular(8),
+        elevation: enabled ? 1 : 0,
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
-          onTap: enabled ? onPressed : null,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            child: Icon(
-              icon,
-              size: 18,
-              color: isPrimary ? SorobanTheme.frameColor : SorobanTheme.backgroundColor,
+          borderRadius: BorderRadius.circular(8),
+          onTap: enabled ? () => controller.executeReset() : null,
+          child: Container(
+            width: width,
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            alignment: Alignment.center,
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.restart_alt_rounded,
+                  size: 18,
+                  color: SorobanTheme.backgroundColor,
+                ),
+                SizedBox(height: 1),
+                Text(
+                  'Reset',
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: SorobanTheme.backgroundColor,
+                  ),
+                ),
+              ],
             ),
           ),
         ),

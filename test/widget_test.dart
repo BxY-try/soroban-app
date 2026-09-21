@@ -63,6 +63,23 @@ void main() {
     // Reset / Retri button is present
     expect(find.byIcon(Icons.restart_alt_rounded), findsOneWidget);
 
+    // Verify positioning:
+    // 1. Timer and Problem progress (1/5) and Reset button are on the LEFT of SorobanView
+    final sorobanLeft = tester.getTopLeft(find.byType(SorobanView)).dx;
+    final resetButtonCenter = tester.getCenter(find.byIcon(Icons.restart_alt_rounded)).dx;
+    final problemProgressCenter = tester.getCenter(find.text('1/5')).dx;
+    final timerCenter = tester.getCenter(find.byIcon(Icons.timer_outlined)).dx;
+
+    expect(resetButtonCenter < sorobanLeft, isTrue);
+    expect(problemProgressCenter < sorobanLeft, isTrue);
+    expect(timerCenter < sorobanLeft, isTrue);
+
+    // 2. Settings button is on the top right
+    final settingsCenter = tester.getCenter(find.byIcon(Icons.settings_outlined)).dx;
+    final backButtonCenter = tester.getCenter(find.byIcon(Icons.arrow_back_rounded)).dx;
+    expect(settingsCenter > sorobanLeft, isTrue);
+    expect(backButtonCenter < sorobanLeft, isTrue);
+
     // Hint & Replay buttons are NOT present in Challenge Mode
     expect(find.byIcon(Icons.lightbulb_rounded), findsNothing);
     expect(find.byIcon(Icons.repeat_rounded), findsNothing);
