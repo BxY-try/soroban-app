@@ -22,9 +22,19 @@ void main() {
       }
     });
 
+    test('Heaven and Earth beads have 100% identical travel distance', () {
+      final heavenTravel = layout.computeHeavenY(true) - layout.computeHeavenY(false);
+      expect(heavenTravel, closeTo(layout.travelDistance, 0.001));
+
+      for (int b = 0; b < 4; b++) {
+        final earthTravel = layout.computeEarthY(b, 0) - layout.computeEarthY(b, 4);
+        expect(earthTravel, closeTo(layout.travelDistance, 0.001));
+      }
+    });
+
     test('Dragging single bead (bead 0) UP when count=0 moves ONLY bead 0', () {
       final initialY = List<double>.generate(4, (b) => layout.computeEarthY(b, 0));
-      const deltaY = -30.0; // Drag upward by 30 pixels
+      final deltaY = -(layout.travelDistance * 0.5); // Intermediate upward drag
 
       final newY = layout.computeEarthDragPositions(
         grabbedIndex: 0,
@@ -33,7 +43,7 @@ void main() {
       );
 
       // Bead 0 must move upward
-      expect(newY[0], equals(initialY[0] + deltaY));
+      expect(newY[0], closeTo(initialY[0] + deltaY, 0.001));
 
       // Beads 1, 2, 3 must stay completely stationary
       expect(newY[1], equals(initialY[1]));
@@ -43,7 +53,7 @@ void main() {
 
     test('Dragging bead 2 UP when count=0 pushes beads 0 and 1, bead 3 stays down', () {
       final initialY = List<double>.generate(4, (b) => layout.computeEarthY(b, 0));
-      const deltaY = -40.0; // Drag upward
+      final deltaY = -(layout.travelDistance * 0.6); // Intermediate upward drag
 
       final newY = layout.computeEarthDragPositions(
         grabbedIndex: 2,
@@ -52,11 +62,11 @@ void main() {
       );
 
       // Bead 2 moved up
-      expect(newY[2], equals(initialY[2] + deltaY));
+      expect(newY[2], closeTo(initialY[2] + deltaY, 0.001));
 
       // Beads 0 and 1 were pushed up by bead 2
-      expect(newY[1], equals(newY[2] - layout.beadPitch));
-      expect(newY[0], equals(newY[1] - layout.beadPitch));
+      expect(newY[1], closeTo(newY[2] - layout.beadPitch, 0.001));
+      expect(newY[0], closeTo(newY[1] - layout.beadPitch, 0.001));
 
       // Bead 3 stayed resting at bottom
       expect(newY[3], equals(initialY[3]));
@@ -64,7 +74,7 @@ void main() {
 
     test('Dragging bead 2 DOWN when count=3 moves ONLY bead 2, beads 0 and 1 stay at beam', () {
       final initialY = List<double>.generate(4, (b) => layout.computeEarthY(b, 3));
-      const deltaY = 30.0; // Drag downward
+      final deltaY = layout.travelDistance * 0.5; // Intermediate downward drag
 
       final newY = layout.computeEarthDragPositions(
         grabbedIndex: 2,
@@ -77,7 +87,7 @@ void main() {
       expect(newY[1], equals(initialY[1]));
 
       // Bead 2 moves down
-      expect(newY[2], equals(initialY[2] + deltaY));
+      expect(newY[2], closeTo(initialY[2] + deltaY, 0.001));
 
       // Bead 3 stays at bottom (since bead 2 hasn't reached it yet)
       expect(newY[3], equals(initialY[3]));
@@ -85,7 +95,7 @@ void main() {
 
     test('Dragging bead 1 DOWN when count=3 pushes bead 2, bead 0 stays at beam', () {
       final initialY = List<double>.generate(4, (b) => layout.computeEarthY(b, 3));
-      const deltaY = 35.0; // Drag downward
+      final deltaY = layout.travelDistance * 0.5; // Intermediate downward drag
 
       final newY = layout.computeEarthDragPositions(
         grabbedIndex: 1,
@@ -97,10 +107,10 @@ void main() {
       expect(newY[0], equals(initialY[0]));
 
       // Bead 1 moves down
-      expect(newY[1], equals(initialY[1] + deltaY));
+      expect(newY[1], closeTo(initialY[1] + deltaY, 0.001));
 
       // Bead 2 is pushed down by bead 1
-      expect(newY[2], equals(newY[1] + layout.beadPitch));
+      expect(newY[2], closeTo(newY[1] + layout.beadPitch, 0.001));
     });
 
     test('Bead cannot be dragged beyond beam or bottom boundary', () {

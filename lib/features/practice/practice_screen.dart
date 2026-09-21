@@ -162,12 +162,16 @@ class _PracticeScreenState extends State<PracticeScreen> {
 
               const SizedBox(height: 4),
 
-              // Big Soroban Focal Point (Expanded)
+              // Big Soroban Focal Point (Scaled slightly for elegant margins)
               const Expanded(
                 child: Center(
-                  child: AspectRatio(
-                    aspectRatio: 2.05,
-                    child: SorobanView(),
+                  child: FractionallySizedBox(
+                    widthFactor: 0.94,
+                    heightFactor: 0.94,
+                    child: AspectRatio(
+                      aspectRatio: 2.05,
+                      child: SorobanView(),
+                    ),
                   ),
                 ),
               ),

@@ -58,15 +58,19 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
 
                       const SizedBox(width: 12),
 
-                      // Soroban Focal Point (Enlarged and shifted towards right with safe margin)
+                      // Soroban Focal Point (Scaled slightly and positioned gently towards center)
                       const Expanded(
                         child: Padding(
-                          padding: EdgeInsets.only(left: 8.0, right: 18.0, bottom: 2.0),
+                          padding: EdgeInsets.only(left: 8.0, right: 14.0, bottom: 2.0),
                           child: Align(
-                            alignment: Alignment(0.40, 0.0),
-                            child: AspectRatio(
-                              aspectRatio: 2.05,
-                              child: SorobanView(),
+                            alignment: Alignment(0.18, 0.0),
+                            child: FractionallySizedBox(
+                              widthFactor: 0.94,
+                              heightFactor: 0.94,
+                              child: AspectRatio(
+                                aspectRatio: 2.05,
+                                child: SorobanView(),
+                              ),
                             ),
                           ),
                         ),

@@ -10,6 +10,8 @@ class SorobanLayout {
   static const double beadGap = 2.0;
   static const double deckPadding = 3.0;
 
+  static const double travelRatio = 0.65;
+
   final Size size;
   final int totalRods;
 
@@ -22,6 +24,25 @@ class SorobanLayout {
   final double beadWidth;
   final double beadHeight;
   final double beadPitch;
+  final double travelDistance;
+
+  static double _computeAvailableDeckHeight(double sizeHeight) {
+    return math.max(
+      0.0,
+      math.max(0.0, sizeHeight - frameBorder * 2) - beamHeight,
+    );
+  }
+
+  static double _computeBeadHeight(double sizeHeight) {
+    final available = _computeAvailableDeckHeight(sizeHeight);
+    final fixedSpace = 3 * beadGap + 4 * deckPadding;
+    final raw = (available - fixedSpace) / (5.0 + 2.0 * travelRatio);
+    return math.max(16.0, raw);
+  }
+
+  static double _computeTravelDistance(double sizeHeight) {
+    return _computeBeadHeight(sizeHeight) * travelRatio;
+  }
 
   SorobanLayout({
     required this.size,
@@ -35,53 +56,30 @@ class SorobanLayout {
         rodSpacing = totalRods > 0
             ? math.max(0.0, size.width - frameBorder * 2) / totalRods
             : 0.0,
-        upperDeckHeight = math.max(
-          0.0,
-          (math.max(0.0, size.height - frameBorder * 2) - beamHeight) * 0.26,
-        ),
-        lowerDeckHeight = math.max(
-          0.0,
-          (math.max(0.0, size.height - frameBorder * 2) - beamHeight) * 0.74,
-        ),
-        beamTop = frameBorder +
-            math.max(
-              0.0,
-              (math.max(0.0, size.height - frameBorder * 2) - beamHeight) * 0.26,
-            ),
-        beamBottom = frameBorder +
-            math.max(
-              0.0,
-              (math.max(0.0, size.height - frameBorder * 2) - beamHeight) * 0.26,
-            ) +
-            beamHeight,
+        beadHeight = _computeBeadHeight(size.height),
+        travelDistance = _computeTravelDistance(size.height),
+        beadPitch = _computeBeadHeight(size.height) + beadGap,
         beadWidth = ((totalRods > 0
                     ? math.max(0.0, size.width - frameBorder * 2) / totalRods
                     : 0.0) *
-                0.92)
-            .clamp(20.0, 130.0),
-        beadHeight = (((math.max(
-                            0.0,
-                            (math.max(0.0, size.height - frameBorder * 2) -
-                                    beamHeight) *
-                                0.74,
-                          ) *
-                          0.58 -
-                      3 * beadGap -
-                      2 * deckPadding) /
-                  4.0))
-            .clamp(16.0, 50.0),
-        beadPitch = (((math.max(
-                            0.0,
-                            (math.max(0.0, size.height - frameBorder * 2) -
-                                    beamHeight) *
-                                0.74,
-                          ) *
-                          0.58 -
-                      3 * beadGap -
-                      2 * deckPadding) /
-                  4.0))
-            .clamp(16.0, 50.0) +
-            beadGap;
+                0.84)
+            .clamp(18.0, 125.0),
+        upperDeckHeight = _computeBeadHeight(size.height) +
+            _computeTravelDistance(size.height) +
+            2 * deckPadding,
+        lowerDeckHeight = 4 * _computeBeadHeight(size.height) +
+            3 * beadGap +
+            _computeTravelDistance(size.height) +
+            2 * deckPadding,
+        beamTop = frameBorder +
+            _computeBeadHeight(size.height) +
+            _computeTravelDistance(size.height) +
+            2 * deckPadding,
+        beamBottom = frameBorder +
+            _computeBeadHeight(size.height) +
+            _computeTravelDistance(size.height) +
+            2 * deckPadding +
+            beamHeight;
 
   /// X coordinate of rod center for a given [rodIndex] (0 = rightmost / units).
   double rodCenterX(int rodIndex) {

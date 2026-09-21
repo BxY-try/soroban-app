@@ -88,10 +88,10 @@ class SorobanPainter extends CustomPainter {
       SorobanLayout.beamHeight,
     );
 
-    // Draw vertical rods
+    // Draw vertical rods (slender and soft for minimal visual clutter)
     final rodPaint = Paint()
       ..color = SorobanTheme.rodColor
-      ..strokeWidth = 3.5
+      ..strokeWidth = 1.8
       ..strokeCap = StrokeCap.round;
 
     for (int col = 0; col < totalRods; col++) {
@@ -226,7 +226,11 @@ class SorobanPainter extends CustomPainter {
     }
   }
 
-  /// Draws a single Soroban bead with bi-conical (diamond-beveled) geometry.
+  /// Draws a single Soroban bead with the authentic 6-vertex bi-conical geometry,
+  /// divided into top and bottom halves with clean flat two-tone shading:
+  /// - Upper half: base color
+  /// - Lower half: slightly darker shade of the same color (flat shadow effect)
+  /// - No glossy textures or specular highlights; calm, clean, and comfortable.
   void _drawBead({
     required Canvas canvas,
     required double centerX,
@@ -241,73 +245,126 @@ class SorobanPainter extends CustomPainter {
     final halfH = height / 2;
     final centerY = y + halfH;
 
-    // Bi-conical diamond polygon path
-    // Points: Left sharp tip, Top apex, Right sharp tip, Bottom apex
-    final path = Path()
-      ..moveTo(centerX - halfW, centerY)
-      ..lineTo(centerX, y)
+    // Collar width where the rod passes through the top and bottom of the bead
+    final collarHalfW = (width * 0.07).clamp(3.5, 5.0);
+
+    // 1. Full 6-vertex symmetric bi-conical frustum path
+    final outerPath = Path()
+      ..moveTo(centerX - collarHalfW, y)
+      ..lineTo(centerX + collarHalfW, y)
       ..lineTo(centerX + halfW, centerY)
-      ..lineTo(centerX, y + height)
+      ..lineTo(centerX + collarHalfW, y + height)
+      ..lineTo(centerX - collarHalfW, y + height)
+      ..lineTo(centerX - halfW, centerY)
       ..close();
 
-    // Determine bead display color:
-    // Inactive beads ALWAYS stay in baseColor (no glowing/tinting on the whole rod).
-    // Active beads get beadActiveColor.
-    // Animating beads get brass glow.
-    Color displayColor;
-    if (isHighlightGlow) {
-      displayColor = SorobanTheme.brassGlowColor;
-    } else if (isActive) {
-      displayColor = SorobanTheme.beadActiveColor;
-    } else {
-      displayColor = baseColor;
-    }
+    // 2. Upper half facet path (top slope)
+    final upperHalfPath = Path()
+      ..moveTo(centerX - collarHalfW, y)
+      ..lineTo(centerX + collarHalfW, y)
+      ..lineTo(centerX + halfW, centerY)
+      ..lineTo(centerX - halfW, centerY)
+      ..close();
 
-    // 1. Subtle drop shadow
-    final shadowPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.20)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.5);
-    canvas.drawPath(path.shift(const Offset(0.5, 1.5)), shadowPaint);
+    // 3. Lower half facet path (bottom slope)
+    final lowerHalfPath = Path()
+      ..moveTo(centerX - halfW, centerY)
+      ..lineTo(centerX + halfW, centerY)
+      ..lineTo(centerX + collarHalfW, y + height)
+      ..lineTo(centerX - collarHalfW, y + height)
+      ..close();
 
-    // 2. Brass glow halo ONLY if actively animating during hint
     if (isHighlightGlow) {
+      // Golden halo glow during hint animation
       final glowPaint = Paint()
-        ..color = SorobanTheme.brassGlowColor.withValues(alpha: 0.75)
+        ..color = SorobanTheme.brassGlowColor.withValues(alpha: 0.60)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8.0);
-      canvas.drawPath(path, glowPaint);
+      canvas.drawPath(outerPath, glowPaint);
+
+      final topColor = SorobanTheme.brassGlowColor;
+      final bottomColor = Color.lerp(topColor, Colors.black, 0.16)!;
+
+      canvas.drawPath(upperHalfPath, Paint()..color = topColor);
+      canvas.drawPath(
+        lowerHalfPath,
+        Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color.lerp(topColor, Colors.black, 0.08)!,
+              bottomColor,
+            ],
+          ).createShader(Rect.fromLTWH(centerX - halfW, centerY, width, halfH)),
+      );
+
+      final borderPaint = Paint()
+        ..color = const Color(0xFFB8860B)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0;
+      canvas.drawPath(outerPath, borderPaint);
+    } else if (isActive) {
+      // ACTIVE BEAD: Matte warm amber / soft saffron
+      final topColor = perRodColor ? baseColor : SorobanTheme.beadActiveColor;
+      final bottomColor = Color.lerp(topColor, Colors.black, 0.18)!;
+
+      // Soft diffused elevation shadow
+      final shadowPaint = Paint()
+        ..color = Colors.black.withValues(alpha: 0.10)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.0);
+      canvas.drawPath(outerPath.shift(const Offset(0.0, 1.5)), shadowPaint);
+
+      // Upper half: flat base color
+      canvas.drawPath(upperHalfPath, Paint()..color = topColor);
+
+      // Lower half: slightly darker shade of same color (flat shadow gradient)
+      final lowerPaint = Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color.lerp(topColor, Colors.black, 0.06)!,
+            bottomColor,
+          ],
+        ).createShader(Rect.fromLTWH(centerX - halfW, centerY, width, halfH));
+      canvas.drawPath(lowerHalfPath, lowerPaint);
+
+      // Subtle crisp outline
+      final borderPaint = Paint()
+        ..color = Color.lerp(topColor, Colors.black, 0.22)!
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0;
+      canvas.drawPath(outerPath, borderPaint);
+    } else {
+      // INACTIVE BEAD (GHOSTING EFFECT):
+      // Warm sand/taupe that blends peacefully with the board background
+      final topColor = perRodColor
+          ? Color.lerp(baseColor, SorobanTheme.beadDefaultColor, 0.72)!
+          : SorobanTheme.beadDefaultColor;
+      final bottomColor = Color.lerp(topColor, Colors.black, 0.10)!;
+
+      // Upper half: flat warm sand
+      canvas.drawPath(upperHalfPath, Paint()..color = topColor);
+
+      // Lower half: slightly darker shade of warm sand
+      final lowerPaint = Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color.lerp(topColor, Colors.black, 0.03)!,
+            bottomColor,
+          ],
+        ).createShader(Rect.fromLTWH(centerX - halfW, centerY, width, halfH));
+      canvas.drawPath(lowerHalfPath, lowerPaint);
+
+      // Very subtle quiet outline
+      final borderPaint = Paint()
+        ..color = SorobanTheme.beadInactiveBorderColor.withValues(alpha: 0.70)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 0.8;
+      canvas.drawPath(outerPath, borderPaint);
     }
-
-    // 3. Main bead body gradient (gives volumetric bi-conical bevel feel)
-    final gradientPaint = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          Color.lerp(displayColor, Colors.white, 0.38)!, // Top highlight ridge
-          displayColor,
-          Color.lerp(displayColor, Colors.black, 0.32)!, // Bottom shadow bevel
-        ],
-        stops: const [0.0, 0.48, 1.0],
-      ).createShader(Rect.fromLTWH(centerX - halfW, y, width, height));
-
-    canvas.drawPath(path, gradientPaint);
-
-    // 4. Center horizontal ridge seam
-    final seamPaint = Paint()
-      ..color = Colors.black.withValues(alpha: 0.24)
-      ..strokeWidth = 0.8;
-    canvas.drawLine(
-      Offset(centerX - halfW + 1.5, centerY),
-      Offset(centerX + halfW - 1.5, centerY),
-      seamPaint,
-    );
-
-    // 5. Border outline
-    final borderPaint = Paint()
-      ..color = Color.lerp(displayColor, Colors.black, 0.45)!
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-    canvas.drawPath(path, borderPaint);
   }
 
   @override
