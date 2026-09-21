@@ -7,6 +7,7 @@ import '../engine/problem_generator.dart';
 import '../models/bead_move.dart';
 import '../models/problem.dart';
 import '../models/soroban_state.dart';
+import '../services/sound_service.dart';
 
 /// Single source of truth managing Soroban state, chained animations,
 /// trail highlights, hint execution, replay rollback, and challenge sessions.
@@ -76,12 +77,19 @@ class SorobanController extends ChangeNotifier {
   bool _perRodColor = false;
   bool get perRodColor => _perRodColor;
 
+  bool _soundEnabled = true;
+  bool get soundEnabled => _soundEnabled;
+
   final Map<String, int> _bestTimes = {}; // key: "category_difficulty" -> ms
 
-  /// Initializes persistence.
+  /// Initializes persistence and audio service.
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _perRodColor = prefs.getBool('per_rod_color') ?? false;
+    _soundEnabled = prefs.getBool('sound_enabled') ?? true;
+
+    SoundService().enabled = _soundEnabled;
+    await SoundService().init();
 
     for (final cat in ProblemCategory.values) {
       for (final diff in Difficulty.values) {
@@ -93,6 +101,14 @@ class SorobanController extends ChangeNotifier {
       }
     }
     notifyListeners();
+  }
+
+  void toggleSound() async {
+    _soundEnabled = !_soundEnabled;
+    SoundService().enabled = _soundEnabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('sound_enabled', _soundEnabled);
   }
 
   void togglePerRodColor() async {
@@ -181,6 +197,7 @@ class SorobanController extends ChangeNotifier {
     final newHeaven = !currentRod.heaven;
     _state = _state.updateRod(rodIndex, currentRod.copyWith(heaven: newHeaven));
 
+    SoundService().playClack();
     _recordTrail('rod_${rodIndex}_heaven');
     _checkCheckpointAdvancement();
     notifyListeners();
@@ -198,6 +215,7 @@ class SorobanController extends ChangeNotifier {
 
     _state = _state.updateRod(rodIndex, currentRod.copyWith(earth: newCount));
 
+    SoundService().playClack();
     _recordTrail('rod_${rodIndex}_earth_$newCount');
     _checkCheckpointAdvancement();
     notifyListeners();
@@ -261,15 +279,16 @@ class SorobanController extends ChangeNotifier {
   bool get canReset =>
       !_isAnimating && (_activeCheckpointIndex > 0 || _state.value != 0);
 
-  /// Replay is only available when a hint has been executed at least once.
+  /// Replay is only available when a hint has been executed at least once (and not in Challenge Mode).
   bool get canReplay =>
+      !_isChallengeMode &&
       !_isAnimating &&
       _currentProblem != null &&
       _lastHintCheckpointIndex != null;
 
   // --- Hint Execution (Chained Animation) ---
   Future<void> executeHint() async {
-    if (_isAnimating || _currentProblem == null) return;
+    if (_isChallengeMode || _isAnimating || _currentProblem == null) return;
 
     final hintResult = hintEngine.getNextHint(
       currentState: _state,
@@ -315,7 +334,7 @@ class SorobanController extends ChangeNotifier {
 
   // --- Replay Execution ---
   Future<void> executeReplay() async {
-    if (_isAnimating || _currentProblem == null) return;
+    if (_isChallengeMode || _isAnimating || _currentProblem == null) return;
     if (_currentProblem!.checkpoints.isEmpty) return;
     if (_lastHintCheckpointIndex == null) return;
 
@@ -450,6 +469,7 @@ class SorobanController extends ChangeNotifier {
       _recordTrail(key);
 
       _state = additionEngine.applyMove(_state, move);
+      SoundService().playClack();
       notifyListeners();
 
       await Future.delayed(move.delay);

@@ -14,6 +14,9 @@ void main() async {
     DeviceOrientation.landscapeRight,
   ]);
 
+  // Hide system notification bar and navigation buttons for immersive full-screen display
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
   final controller = SorobanController();
   await controller.init();
 

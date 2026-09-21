@@ -7,10 +7,10 @@ import '../soroban_widget/soroban_view.dart';
 import 'result_screen.dart';
 
 /// The core exercise & challenge screen.
-/// Implements the landscape layout defined in §5:
-/// - Thin top strip: problem text with checkpoint breadcrumbs + timer + settings.
-/// - Big Soroban: occupies 75-80% of screen height as the central focal point.
-/// - Thin bottom strip: 3 icon-only control buttons: Replay (🔁), Hint (💡), Reset (↺).
+/// Implements the landscape layout:
+/// - Thin top strip: problem text + timer + settings.
+/// - Big Soroban: occupies central focal point.
+/// - Thin bottom strip: control button Reset (↺).
 class ChallengeScreen extends StatefulWidget {
   const ChallengeScreen({super.key});
 
@@ -32,37 +32,90 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
       });
     }
 
-    return Scaffold(
-      backgroundColor: SorobanTheme.backgroundColor,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
-          child: Column(
-            children: [
-              // 1. Thin Top Strip
-              _buildTopStrip(context, controller),
+    return PopScope(
+      canPop: !controller.isChallengeMode || controller.isChallengeCompleted,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _confirmExit(context, controller);
+      },
+      child: Scaffold(
+        backgroundColor: SorobanTheme.backgroundColor,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+            child: Column(
+              children: [
+                // 1. Thin Top Strip
+                _buildTopStrip(context, controller),
 
-              const SizedBox(height: 4),
+                const SizedBox(height: 4),
 
-              // 2. Big Soroban Focal Point (Expanded with large aspect ratio)
-              const Expanded(
-                child: Center(
-                  child: AspectRatio(
-                    aspectRatio: 2.1, // Expanded widescreen aspect ratio for larger beads
-                    child: SorobanView(),
+                // 2. Big Soroban Focal Point (Expanded with large aspect ratio)
+                const Expanded(
+                  child: Center(
+                    child: AspectRatio(
+                      aspectRatio: 2.1, // Expanded widescreen aspect ratio for larger beads
+                      child: SorobanView(),
+                    ),
                   ),
                 ),
-              ),
 
-              const SizedBox(height: 4),
+                const SizedBox(height: 4),
 
-              // 3. Compact Bottom Strip
-              _buildBottomStrip(context, controller),
-            ],
+                // 3. Compact Bottom Strip
+                _buildBottomStrip(context, controller),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _confirmExit(BuildContext context, SorobanController controller) async {
+    if (!controller.isChallengeMode || controller.isChallengeCompleted) {
+      if (context.mounted) Navigator.of(context).pop();
+      return;
+    }
+
+    final shouldLeave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: SorobanTheme.backgroundColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Tinggalkan Tantangan?',
+          style: TextStyle(
+            color: SorobanTheme.textDark,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: const Text(
+          'Waktu dan progres tantangan yang sedang berjalan akan dibatalkan.',
+          style: TextStyle(color: SorobanTheme.textMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text(
+              'Lanjut Main',
+              style: TextStyle(color: SorobanTheme.beadDefaultColor, fontWeight: FontWeight.bold),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: SorobanTheme.frameColor,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Keluar'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldLeave == true && context.mounted) {
+      Navigator.of(context).pop();
+    }
   }
 
   /// Top strip: problem text with tabular monospace figures, checkpoint breadcrumbs, timer, settings
@@ -75,7 +128,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
           IconButton(
             icon: const Icon(Icons.arrow_back_rounded, size: 24),
             tooltip: 'Kembali',
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => _confirmExit(context, controller),
           ),
 
           const SizedBox(width: 8),
@@ -131,101 +184,33 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
     );
   }
 
-  /// Displays the mathematical problem equation with completed checkpoints marked
+  /// Displays the mathematical problem equation
   Widget _buildProblemText(SorobanController controller) {
     final problem = controller.currentProblem;
     if (problem == null) return const SizedBox.shrink();
 
-    // Checkpoints reached count
-    final activeCpIdx = controller.activeCheckpointIndex;
-
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          // Equation display
-          Text(
-            problem.displayText,
-            style: SorobanTheme.monospaceDigitStyle.copyWith(fontSize: 26),
-          ),
-          const SizedBox(width: 12),
-          const Text('=', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: SorobanTheme.textMuted)),
-          const SizedBox(width: 12),
-          // Current abacus value display
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-            decoration: BoxDecoration(
-              color: SorobanTheme.beadActiveColor.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(
-                color: SorobanTheme.beadActiveColor.withValues(alpha: 0.5),
-                width: 1.5,
-              ),
-            ),
-            child: Text(
-              controller.state.value.toString(),
-              style: SorobanTheme.monospaceDigitStyle.copyWith(
-                fontSize: 26,
-                color: SorobanTheme.textDark,
-              ),
-            ),
-          ),
-          if (activeCpIdx > 0 && activeCpIdx <= problem.checkpoints.length) ...[
-            const SizedBox(width: 8),
-            Text(
-              '(${problem.checkpoints[activeCpIdx - 1].label})',
-              style: const TextStyle(
-                fontSize: 14,
-                color: SorobanTheme.beadDefaultColor,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ],
+      child: Text(
+        problem.displayText,
+        style: SorobanTheme.monospaceDigitStyle.copyWith(fontSize: 26),
       ),
     );
   }
 
-  /// Bottom strip: 3 icon-only buttons as specified in §5
-  /// Bottom strip: 3 compact icon-only control buttons
+  /// Bottom strip: compact icon-only control button (Reset / Retri)
   Widget _buildBottomStrip(BuildContext context, SorobanController controller) {
-    final bool isAnimating = controller.isAnimating;
-
     return SizedBox(
       height: 36,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // 1. Reset / Retri Button (↺)
+          // Reset / Retri Button (↺)
           _buildControlButton(
             icon: Icons.restart_alt_rounded,
             tooltip: 'Retri (Kembali ke checkpoint sebelumnya)',
             enabled: controller.canReset,
             onPressed: () => controller.executeReset(),
-          ),
-
-          const SizedBox(width: 20),
-
-          // 2. Hint Button (💡)
-          _buildControlButton(
-            icon: Icons.lightbulb_rounded,
-            tooltip: 'Hint (Jalankan animasi langkah berikutnya)',
-            isPrimary: true,
-            enabled: !isAnimating &&
-                controller.currentProblem != null &&
-                controller.activeCheckpointIndex <
-                    controller.currentProblem!.checkpoints.length,
-            onPressed: () => controller.executeHint(),
-          ),
-
-          const SizedBox(width: 20),
-
-          // 3. Replay Hint Button (🔁)
-          _buildControlButton(
-            icon: Icons.repeat_rounded,
-            tooltip: 'Replay Hint (Putar ulang animasi langkah digit ini)',
-            enabled: controller.canReplay,
-            onPressed: () => controller.executeReplay(),
           ),
         ],
       ),

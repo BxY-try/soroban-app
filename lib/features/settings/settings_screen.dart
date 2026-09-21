@@ -69,6 +69,20 @@ class SettingsScreen extends StatelessWidget {
                           value: controller.perRodColor,
                           onChanged: (_) => controller.togglePerRodColor(),
                         ),
+                        const Divider(height: 24),
+                        SwitchListTile(
+                          title: const Text(
+                            'Efek Suara Manik (Sound FX)',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: const Text(
+                            'Memutar efek suara ketukan kayu (clack) yang taktil saat manik digerakkan manual maupun melalui animasi hint.',
+                            style: TextStyle(fontSize: 12, color: SorobanTheme.textMuted),
+                          ),
+                          activeThumbColor: SorobanTheme.beadActiveColor,
+                          value: controller.soundEnabled,
+                          onChanged: (_) => controller.toggleSound(),
+                        ),
                       ],
                     ),
                   ),

@@ -56,6 +56,37 @@ class AdditionEngine {
     }
   }
 
+  static BeadMove _heavenMove({
+    required int rodIndex,
+    required int from,
+    required int to,
+  }) {
+    final description = to == 5
+        ? 'Rod $rodIndex: Turunkan manik langit (+5)'
+        : 'Rod $rodIndex: Naikkan manik langit (-5)';
+    return BeadMove(
+      rodIndex: rodIndex,
+      kind: BeadKind.heaven,
+      from: from,
+      to: to,
+      description: description,
+    );
+  }
+
+  static BeadMove _earthMove({
+    required int rodIndex,
+    required int from,
+    required int to,
+  }) {
+    return BeadMove(
+      rodIndex: rodIndex,
+      kind: BeadKind.earth,
+      from: from,
+      to: to,
+      description: 'Rod $rodIndex: Manik bumi $from -> $to',
+    );
+  }
+
   /// Internal: calculates moves for adding [d] (1..9) to rod [rodIndex].
   List<BeadMove> _calculateAdditionMoves(
     SorobanState state,
@@ -73,33 +104,16 @@ class AdditionEngine {
       final targetEarth = targetVal % 5;
 
       if (!currentRod.heaven && targetHeaven) {
-        // Heaven bead activated (+5)
-        moves.add(BeadMove(
-          rodIndex: rodIndex,
-          kind: BeadKind.heaven,
-          from: 0,
-          to: 5,
-          description: 'Rod $rodIndex: Turunkan manik langit (+5)',
-        ));
+        moves.add(_heavenMove(rodIndex: rodIndex, from: 0, to: 5));
       } else if (currentRod.heaven && !targetHeaven) {
-        // Should not happen for addition without carry, but for completeness:
-        moves.add(BeadMove(
-          rodIndex: rodIndex,
-          kind: BeadKind.heaven,
-          from: 5,
-          to: 0,
-          description: 'Rod $rodIndex: Naikkan manik langit (-5)',
-        ));
+        moves.add(_heavenMove(rodIndex: rodIndex, from: 5, to: 0));
       }
 
       if (currentRod.earth != targetEarth) {
-        moves.add(BeadMove(
+        moves.add(_earthMove(
           rodIndex: rodIndex,
-          kind: BeadKind.earth,
           from: currentRod.earth,
           to: targetEarth,
-          description:
-              'Rod $rodIndex: Manik bumi ${currentRod.earth} -> $targetEarth',
         ));
       }
     } else {
@@ -115,32 +129,16 @@ class AdditionEngine {
       final targetEarth = targetVal % 5;
 
       if (currentRod.heaven && !targetHeaven) {
-        // Heaven bead goes from active (5) to inactive (0)
-        moves.add(BeadMove(
-          rodIndex: rodIndex,
-          kind: BeadKind.heaven,
-          from: 5,
-          to: 0,
-          description: 'Rod $rodIndex: Naikkan manik langit (-5)',
-        ));
+        moves.add(_heavenMove(rodIndex: rodIndex, from: 5, to: 0));
       } else if (!currentRod.heaven && targetHeaven) {
-        moves.add(BeadMove(
-          rodIndex: rodIndex,
-          kind: BeadKind.heaven,
-          from: 0,
-          to: 5,
-          description: 'Rod $rodIndex: Turunkan manik langit (+5)',
-        ));
+        moves.add(_heavenMove(rodIndex: rodIndex, from: 0, to: 5));
       }
 
       if (currentRod.earth != targetEarth) {
-        moves.add(BeadMove(
+        moves.add(_earthMove(
           rodIndex: rodIndex,
-          kind: BeadKind.earth,
           from: currentRod.earth,
           to: targetEarth,
-          description:
-              'Rod $rodIndex: Manik bumi ${currentRod.earth} -> $targetEarth',
         ));
       }
     }
@@ -165,23 +163,14 @@ class AdditionEngine {
       final targetEarth = targetVal % 5;
 
       if (currentRod.heaven && !targetHeaven) {
-        moves.add(BeadMove(
-          rodIndex: rodIndex,
-          kind: BeadKind.heaven,
-          from: 5,
-          to: 0,
-          description: 'Rod $rodIndex: Naikkan manik langit (-5)',
-        ));
+        moves.add(_heavenMove(rodIndex: rodIndex, from: 5, to: 0));
       }
 
       if (currentRod.earth != targetEarth) {
-        moves.add(BeadMove(
+        moves.add(_earthMove(
           rodIndex: rodIndex,
-          kind: BeadKind.earth,
           from: currentRod.earth,
           to: targetEarth,
-          description:
-              'Rod $rodIndex: Manik bumi ${currentRod.earth} -> $targetEarth',
         ));
       }
     } else {
@@ -196,31 +185,16 @@ class AdditionEngine {
       final targetEarth = targetVal % 5;
 
       if (!currentRod.heaven && targetHeaven) {
-        moves.add(BeadMove(
-          rodIndex: rodIndex,
-          kind: BeadKind.heaven,
-          from: 0,
-          to: 5,
-          description: 'Rod $rodIndex: Turunkan manik langit (+5)',
-        ));
+        moves.add(_heavenMove(rodIndex: rodIndex, from: 0, to: 5));
       } else if (currentRod.heaven && !targetHeaven) {
-        moves.add(BeadMove(
-          rodIndex: rodIndex,
-          kind: BeadKind.heaven,
-          from: 5,
-          to: 0,
-          description: 'Rod $rodIndex: Naikkan manik langit (-5)',
-        ));
+        moves.add(_heavenMove(rodIndex: rodIndex, from: 5, to: 0));
       }
 
       if (currentRod.earth != targetEarth) {
-        moves.add(BeadMove(
+        moves.add(_earthMove(
           rodIndex: rodIndex,
-          kind: BeadKind.earth,
           from: currentRod.earth,
           to: targetEarth,
-          description:
-              'Rod $rodIndex: Manik bumi ${currentRod.earth} -> $targetEarth',
         ));
       }
     }

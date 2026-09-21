@@ -96,4 +96,45 @@ void main() {
       expect(controller.canReplay, isFalse);
     });
   });
+
+  group('SorobanController Challenge Mode Behavior Tests', () {
+    test('executeHint and executeReplay are completely disabled in Challenge Mode', () async {
+      final controller = SorobanController();
+      addTearDown(() => controller.dispose());
+      controller.startChallengeSession(ProblemCategory.addition, Difficulty.easy);
+
+      expect(controller.isChallengeMode, isTrue);
+      expect(controller.canReplay, isFalse);
+      expect(controller.state.value, equals(0));
+      expect(controller.activeCheckpointIndex, equals(0));
+
+      // Attempt to execute hint in challenge mode
+      await controller.executeHint();
+
+      // State and checkpoint must remain unchanged
+      expect(controller.state.value, equals(0));
+      expect(controller.activeCheckpointIndex, equals(0));
+      expect(controller.canReplay, isFalse);
+
+      // Attempt to execute replay in challenge mode
+      await controller.executeReplay();
+      expect(controller.state.value, equals(0));
+      expect(controller.activeCheckpointIndex, equals(0));
+    });
+
+    test('executeReset still works properly in Challenge Mode', () {
+      final controller = SorobanController();
+      addTearDown(() => controller.dispose());
+      controller.startChallengeSession(ProblemCategory.addition, Difficulty.easy);
+
+      // Move a bead manually
+      controller.tapEarthBead(0, 2);
+      expect(controller.state.value, equals(2));
+      expect(controller.canReset, isTrue);
+
+      // Reset restores mistake to 0
+      controller.executeReset();
+      expect(controller.state.value, equals(0));
+    });
+  });
 }

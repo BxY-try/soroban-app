@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../../core/models/soroban_state.dart';
 import '../../shared/theme.dart';
+import 'soroban_layout.dart';
 
 /// Procedural CustomPainter that renders a 7-rod Japanese Soroban (sempoa)
 /// with natural wood textures, bi-conical diamond beads, brass accents,
@@ -22,6 +23,15 @@ class SorobanPainter extends CustomPainter {
   /// Animation progress 0.0 (at previousState) to 1.0 (at state). Values >= 1 mean no animation.
   final double animationProgress;
 
+  /// Rod index currently being dragged by the user (null when not dragging).
+  final int? dragRodIndex;
+
+  /// Exact floating Y positions of the 4 earth beads during drag.
+  final List<double>? dragEarthY;
+
+  /// Exact floating Y position of the heaven bead during drag.
+  final double? dragHeavenY;
+
   SorobanPainter({
     required this.state,
     required this.perRodColor,
@@ -29,17 +39,23 @@ class SorobanPainter extends CustomPainter {
     required this.trailBeads,
     this.previousState,
     this.animationProgress = 1.0,
+    this.dragRodIndex,
+    this.dragEarthY,
+    this.dragHeavenY,
   });
 
-  // Layout constants shared with SorobanView for hit testing
-  static const double frameBorder = 12.0;
-  static const double beamHeight = 14.0;
-  static const double beadGap = 2.0;
-  static const double deckPadding = 3.0;
+  // Layout constants forwarded from SorobanLayout for backward compatibility
+  static const double frameBorder = SorobanLayout.frameBorder;
+  static const double beamHeight = SorobanLayout.beamHeight;
+  static const double beadGap = SorobanLayout.beadGap;
+  static const double deckPadding = SorobanLayout.deckPadding;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.width <= 0 || size.height <= 0) return;
+
+    final totalRods = state.rods.length;
+    final layout = SorobanLayout(size: size, totalRods: totalRods);
 
     // Draw background
     final bgPaint = Paint()..color = SorobanTheme.backgroundColor;
@@ -53,12 +69,7 @@ class SorobanPainter extends CustomPainter {
 
     // Frame paint (Dark Walnut)
     final framePaint = Paint()..color = SorobanTheme.frameColor;
-    final frameInnerRect = Rect.fromLTWH(
-      frameBorder,
-      frameBorder,
-      size.width - (frameBorder * 2),
-      size.height - (frameBorder * 2),
-    );
+    final frameInnerRect = layout.innerRect;
 
     // Draw outer wood frame
     canvas.drawRRect(sorobanRect, framePaint);
@@ -70,23 +81,11 @@ class SorobanPainter extends CustomPainter {
       innerBoardPaint,
     );
 
-    // Calculate dimensions
-    final totalRods = state.rods.length;
-    final usableWidth = frameInnerRect.width;
-    final rodSpacing = usableWidth / totalRods;
-
-    // Heights for upper and lower decks
-    final innerHeight = frameInnerRect.height;
-    // Upper deck ~26%, Beam ~14px, Lower deck ~74%
-    final upperDeckHeight = (innerHeight - beamHeight) * 0.26;
-    final lowerDeckHeight = innerHeight - beamHeight - upperDeckHeight;
-
-    final beamTop = frameInnerRect.top + upperDeckHeight;
     final beamRect = Rect.fromLTWH(
       frameInnerRect.left,
-      beamTop,
+      layout.beamTop,
       frameInnerRect.width,
-      beamHeight,
+      SorobanLayout.beamHeight,
     );
 
     // Draw vertical rods
@@ -96,7 +95,8 @@ class SorobanPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
 
     for (int col = 0; col < totalRods; col++) {
-      final rodCenterX = frameInnerRect.left + (col + 0.5) * rodSpacing;
+      final rodIndex = totalRods - 1 - col;
+      final rodCenterX = layout.rodCenterX(rodIndex);
       // Draw rod passing through upper deck, beam, and lower deck
       canvas.drawLine(
         Offset(rodCenterX, frameInnerRect.top),
@@ -111,49 +111,14 @@ class SorobanPainter extends CustomPainter {
     // Draw unit alignment dots on the beam (white dots on every 3rd rod, e.g. units rod 0, rod 3, rod 6)
     final dotPaint = Paint()..color = SorobanTheme.beamDotColor;
     for (int col = 0; col < totalRods; col++) {
-      // Rod index from right: (totalRods - 1 - col)
       final rodIndex = totalRods - 1 - col;
       if (rodIndex % 3 == 0) {
-        final rodCenterX = frameInnerRect.left + (col + 0.5) * rodSpacing;
+        final rodCenterX = layout.rodCenterX(rodIndex);
         canvas.drawCircle(
-          Offset(rodCenterX, beamTop + (beamHeight / 2)),
+          Offset(rodCenterX, layout.beamTop + (SorobanLayout.beamHeight / 2)),
           2.5,
           dotPaint,
         );
-      }
-    }
-
-    // Bead dimensions — symmetrical sizing
-    final beadWidth = (rodSpacing * 0.88).clamp(20.0, 96.0);
-
-    // Earth bead height: 4 beads + 3 gaps + 2 paddings must fit within ~55% of lowerDeckHeight
-    final beadHeight = ((lowerDeckHeight * 0.55 - 3 * beadGap - 2 * deckPadding) / 4.0)
-        .clamp(14.0, 36.0);
-
-    // Consistent pitch for stacked beads
-    final beadPitch = beadHeight + beadGap;
-
-    // Helper: compute heaven Y position for a given rod state
-    double computeHeavenY(bool isActive) {
-      return isActive
-          ? (beamTop - deckPadding - beadHeight)
-          : (frameInnerRect.top + deckPadding);
-    }
-
-    // Helper: compute earth bead Y position for a given bead index and active count
-    double computeEarthY(int beadIndex, int activeCount) {
-      final lowerDeckTop = beamTop + beamHeight;
-      final lowerDeckBottom = frameInnerRect.bottom;
-
-      if (beadIndex < activeCount) {
-        // Active: anchored from beam bottom
-        return lowerDeckTop + deckPadding + (beadIndex * beadPitch);
-      } else {
-        // Inactive: anchored from frame bottom
-        final totalInactive = 4 - activeCount;
-        final inactiveIndex = beadIndex - activeCount;
-        return lowerDeckBottom - deckPadding -
-            ((totalInactive - inactiveIndex) * beadPitch) + beadGap;
       }
     }
 
@@ -164,7 +129,7 @@ class SorobanPainter extends CustomPainter {
     for (int col = 0; col < totalRods; col++) {
       final rodIndex = totalRods - 1 - col;
       final rod = state.rods[rodIndex];
-      final rodCenterX = frameInnerRect.left + (col + 0.5) * rodSpacing;
+      final rodCenterX = layout.rodCenterX(rodIndex);
 
       // Previous rod state for interpolation
       final prevRod = (isAnimating && rodIndex < previousState!.rods.length)
@@ -176,12 +141,24 @@ class SorobanPainter extends CustomPainter {
           ? SorobanTheme.perRodColors[rodIndex % SorobanTheme.perRodColors.length]
           : SorobanTheme.beadDefaultColor;
 
-      // 1. Heaven Bead — smooth slide
-      final targetHeavenY = computeHeavenY(rod.heaven);
-      final prevHeavenY = computeHeavenY(prevRod.heaven);
-      final heavenY = isAnimating
-          ? ui.lerpDouble(prevHeavenY, targetHeavenY, t)!
-          : targetHeavenY;
+      // Is this the rod currently being dragged?
+      final isDragRod = rodIndex == dragRodIndex;
+
+      // 1. Heaven Bead — drag-float or smooth slide
+      double heavenY;
+      bool heavenActive;
+
+      if (isDragRod && dragHeavenY != null) {
+        heavenY = dragHeavenY!;
+        heavenActive = layout.resolveHeavenActive(heavenY);
+      } else {
+        final targetHeavenY = layout.computeHeavenY(rod.heaven);
+        final prevHeavenY = layout.computeHeavenY(prevRod.heaven);
+        heavenY = isAnimating
+            ? ui.lerpDouble(prevHeavenY, targetHeavenY, t)!
+            : targetHeavenY;
+        heavenActive = rod.heaven;
+      }
 
       final heavenKey = 'rod_${rodIndex}_heaven';
       final isHeavenAnimating = animatingBeadKey == heavenKey;
@@ -190,40 +167,61 @@ class SorobanPainter extends CustomPainter {
         canvas: canvas,
         centerX: rodCenterX,
         y: heavenY,
-        width: beadWidth,
-        height: beadHeight,
+        width: layout.beadWidth,
+        height: layout.beadHeight,
         baseColor: baseColor,
-        isActive: rod.heaven,
+        isActive: heavenActive,
         isHighlightGlow: isHeavenAnimating,
       );
 
-      // 2. Earth Beads (4 beads) — smooth slide
-      final activeCount = rod.earth;
-      final prevActiveCount = prevRod.earth;
+      // 2. Earth Beads (4 beads) — drag-float or smooth slide
+      if (isDragRod && dragEarthY != null) {
+        for (int b = 0; b < 4; b++) {
+          final beadY = dragEarthY![b];
+          final midY = (layout.computeEarthY(b, 4) + layout.computeEarthY(b, 0)) / 2.0;
+          final isActive = beadY < midY;
 
-      for (int b = 0; b < 4; b++) {
-        final bool isThisBeadActive = b < activeCount;
-        final targetY = computeEarthY(b, activeCount);
-        final prevY = computeEarthY(b, prevActiveCount);
-        final beadY = isAnimating
-            ? ui.lerpDouble(prevY, targetY, t)!
-            : targetY;
+          _drawBead(
+            canvas: canvas,
+            centerX: rodCenterX,
+            y: beadY,
+            width: layout.beadWidth,
+            height: layout.beadHeight,
+            baseColor: baseColor,
+            isActive: isActive,
+            isHighlightGlow: false,
+          );
+        }
+      } else {
+        // Normal rendering: discrete state with optional slide animation
+        final activeCount = rod.earth;
+        final prevActiveCount = prevRod.earth;
 
-        // Only active bead being animated gets isHighlightGlow.
-        // Inactive beads NEVER light up!
-        final earthKey = 'rod_${rodIndex}_earth_$activeCount';
-        final isEarthAnimating = isThisBeadActive && (animatingBeadKey == earthKey);
+        for (int b = 0; b < 4; b++) {
+          final bool isThisBeadActive = b < activeCount;
+          final targetY = layout.computeEarthY(b, activeCount);
+          final prevY = layout.computeEarthY(b, prevActiveCount);
+          final beadY = isAnimating
+              ? ui.lerpDouble(prevY, targetY, t)!
+              : targetY;
 
-        _drawBead(
-          canvas: canvas,
-          centerX: rodCenterX,
-          y: beadY,
-          width: beadWidth,
-          height: beadHeight,
-          baseColor: baseColor,
-          isActive: isThisBeadActive,
-          isHighlightGlow: isEarthAnimating,
-        );
+          // Only active bead being animated gets isHighlightGlow.
+          // Inactive beads NEVER light up!
+          final earthKey = 'rod_${rodIndex}_earth_$activeCount';
+          final isEarthAnimating =
+              isThisBeadActive && (animatingBeadKey == earthKey);
+
+          _drawBead(
+            canvas: canvas,
+            centerX: rodCenterX,
+            y: beadY,
+            width: layout.beadWidth,
+            height: layout.beadHeight,
+            baseColor: baseColor,
+            isActive: isThisBeadActive,
+            isHighlightGlow: isEarthAnimating,
+          );
+        }
       }
     }
   }
@@ -314,6 +312,6 @@ class SorobanPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SorobanPainter oldDelegate) {
-    return true; // Always repaint when controller notifies
+    return true; // Always repaint when controller or animation notifies
   }
 }
