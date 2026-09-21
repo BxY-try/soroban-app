@@ -166,7 +166,7 @@ class _PracticeScreenState extends State<PracticeScreen> {
               const Expanded(
                 child: Center(
                   child: AspectRatio(
-                    aspectRatio: 2.1,
+                    aspectRatio: 2.05,
                     child: SorobanView(),
                   ),
                 ),

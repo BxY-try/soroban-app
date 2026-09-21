@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/models/soroban_state.dart';
 import '../../core/state/soroban_controller.dart';
+import '../../shared/theme.dart';
 import 'soroban_layout.dart';
 import 'soroban_painter.dart';
 
@@ -14,7 +15,12 @@ import 'soroban_painter.dart';
 /// - **Sustained drag** (pointer moves beyond slop): beads follow the
 ///   cursor/finger in real-time with 1D rigid body push physics, committing on release.
 class SorobanView extends StatefulWidget {
-  const SorobanView({super.key});
+  final bool showDigitalReadout;
+
+  const SorobanView({
+    super.key,
+    this.showDigitalReadout = true,
+  });
 
   @override
   State<SorobanView> createState() => _SorobanViewState();
@@ -109,6 +115,23 @@ class _SorobanViewState extends State<SorobanView>
     // Detect state changes and trigger animation
     _onStateChanged(controller.state);
 
+    if (!widget.showDigitalReadout) {
+      return _buildAbacus(controller);
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Expanded(
+          child: _buildAbacus(controller),
+        ),
+        const SizedBox(height: 6),
+        _buildDigitalReadout(controller),
+      ],
+    );
+  }
+
+  Widget _buildAbacus(SorobanController controller) {
     return LayoutBuilder(
       builder: (context, constraints) {
         _lastSize = constraints.biggest;
@@ -142,6 +165,59 @@ class _SorobanViewState extends State<SorobanView>
           ),
         );
       },
+    );
+  }
+
+  Widget _buildDigitalReadout(SorobanController controller) {
+    final totalRods = controller.state.rods.length;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: SorobanLayout.frameBorder),
+      child: Row(
+        children: List.generate(totalRods, (col) {
+          final rodIndex = totalRods - 1 - col;
+          final rodValue = controller.state.rods[rodIndex].value;
+          final hasValue = rodValue > 0;
+
+          return Expanded(
+            child: Center(
+              child: Container(
+                constraints: const BoxConstraints(
+                  minWidth: 28,
+                  maxWidth: 36,
+                  minHeight: 26,
+                  maxHeight: 28,
+                ),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: hasValue
+                      ? SorobanTheme.frameColor.withValues(alpha: 0.10)
+                      : SorobanTheme.frameColor.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: hasValue
+                        ? SorobanTheme.frameColor.withValues(alpha: 0.28)
+                        : SorobanTheme.frameColor.withValues(alpha: 0.12),
+                    width: 1.0,
+                  ),
+                ),
+                child: Text(
+                  '$rodValue',
+                  style: TextStyle(
+                    fontFamily: 'Courier',
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    fontSize: 16,
+                    fontWeight: hasValue ? FontWeight.bold : FontWeight.w500,
+                    color: hasValue
+                        ? SorobanTheme.textDark
+                        : SorobanTheme.textMuted,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
     );
   }
 

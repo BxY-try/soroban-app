@@ -57,30 +57,30 @@ class SorobanLayout {
         beadWidth = ((totalRods > 0
                     ? math.max(0.0, size.width - frameBorder * 2) / totalRods
                     : 0.0) *
-                0.88)
-            .clamp(20.0, 96.0),
+                0.92)
+            .clamp(20.0, 130.0),
         beadHeight = (((math.max(
                             0.0,
                             (math.max(0.0, size.height - frameBorder * 2) -
                                     beamHeight) *
                                 0.74,
                           ) *
-                          0.55 -
+                          0.58 -
                       3 * beadGap -
                       2 * deckPadding) /
                   4.0))
-            .clamp(14.0, 36.0),
+            .clamp(16.0, 50.0),
         beadPitch = (((math.max(
                             0.0,
                             (math.max(0.0, size.height - frameBorder * 2) -
                                     beamHeight) *
                                 0.74,
                           ) *
-                          0.55 -
+                          0.58 -
                       3 * beadGap -
                       2 * deckPadding) /
                   4.0))
-            .clamp(14.0, 36.0) +
+            .clamp(16.0, 50.0) +
             beadGap;
 
   /// X coordinate of rod center for a given [rodIndex] (0 = rightmost / units).

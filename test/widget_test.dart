@@ -87,6 +87,24 @@ void main() {
     // '=' and abacus value display are NOT present in Challenge Mode problem text
     expect(find.text('='), findsNothing);
 
+    // Verify digital readout under Soroban shows 7 column digits (all 0 initially)
+    expect(
+      find.descendant(of: find.byType(SorobanView), matching: find.text('0')),
+      findsNWidgets(7),
+    );
+
+    // When beads are toggled, the corresponding rod digital value updates
+    controller.tapEarthBead(0, 3); // 3 earth beads active on rod 0
+    await tester.pump();
+    expect(
+      find.descendant(of: find.byType(SorobanView), matching: find.text('3')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: find.byType(SorobanView), matching: find.text('0')),
+      findsNWidgets(6),
+    );
+
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });

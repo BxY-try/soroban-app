@@ -56,14 +56,18 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
                       // Left Panel (underneath "Kembali ke App" button)
                       _buildLeftPanel(context, controller),
 
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 12),
 
-                      // Soroban Focal Point (Expanded widescreen)
+                      // Soroban Focal Point (Enlarged and shifted towards right with safe margin)
                       const Expanded(
-                        child: Center(
-                          child: AspectRatio(
-                            aspectRatio: 2.1,
-                            child: SorobanView(),
+                        child: Padding(
+                          padding: EdgeInsets.only(left: 8.0, right: 18.0, bottom: 2.0),
+                          child: Align(
+                            alignment: Alignment(0.40, 0.0),
+                            child: AspectRatio(
+                              aspectRatio: 2.05,
+                              child: SorobanView(),
+                            ),
                           ),
                         ),
                       ),
