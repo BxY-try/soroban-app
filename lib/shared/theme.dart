@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 /// Natural Wood Color Palette and Design System Tokens
 /// As specified in §4 of the Soroban technical plan.
@@ -50,6 +51,46 @@ class SorobanTheme {
   ];
 
   // --- Typography ---
+  /// Luwes & slender problem equation style (Outfit)
+  static TextStyle problemEquationStyle({
+    double fontSize = 24,
+    FontWeight fontWeight = FontWeight.w400,
+    Color color = textDark,
+  }) {
+    return GoogleFonts.outfit(
+      textStyle: TextStyle(
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        color: color,
+        letterSpacing: 0.5,
+      ),
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: color,
+      letterSpacing: 0.5,
+    );
+  }
+
+  /// Pudar (completed) checkpoint digit style with clear dimmed alpha
+  static TextStyle problemEquationCompletedStyle({
+    double fontSize = 24,
+    FontWeight fontWeight = FontWeight.w400,
+  }) {
+    final dimmedColor = textDark.withValues(alpha: 0.22);
+    return GoogleFonts.outfit(
+      textStyle: TextStyle(
+        fontSize: fontSize,
+        fontWeight: fontWeight,
+        color: dimmedColor,
+        letterSpacing: 0.5,
+      ),
+      fontSize: fontSize,
+      fontWeight: fontWeight,
+      color: dimmedColor,
+      letterSpacing: 0.5,
+    );
+  }
+
   static const TextStyle monospaceDigitStyle = TextStyle(
     fontFamily: 'Courier',
     fontFeatures: [FontFeature.tabularFigures()],

@@ -12,6 +12,10 @@ class SorobanLayout {
 
   static const double travelRatio = 0.65;
 
+  /// Proportional scaling factor for beads to keep them compact,
+  /// aesthetically balanced, and comfortably spaced.
+  static const double beadScale = 0.90;
+
   final Size size;
   final int totalRods;
 

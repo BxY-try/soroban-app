@@ -49,6 +49,7 @@ class SorobanPainter extends CustomPainter {
   static const double beamHeight = SorobanLayout.beamHeight;
   static const double beadGap = SorobanLayout.beadGap;
   static const double deckPadding = SorobanLayout.deckPadding;
+  static const double beadScale = SorobanLayout.beadScale;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -240,28 +241,33 @@ class SorobanPainter extends CustomPainter {
     required Color baseColor,
     required bool isActive,
     required bool isHighlightGlow,
+    double scale = beadScale,
   }) {
-    final halfW = width / 2;
-    final halfH = height / 2;
-    final centerY = y + halfH;
+    final scaledWidth = width * scale;
+    final scaledHeight = height * scale;
+    final halfW = scaledWidth / 2;
+    final halfH = scaledHeight / 2;
+    final centerY = y + (height / 2);
+    final topY = centerY - halfH;
+    final bottomY = centerY + halfH;
 
     // Collar width where the rod passes through the top and bottom of the bead
-    final collarHalfW = (width * 0.07).clamp(3.5, 5.0);
+    final collarHalfW = (scaledWidth * 0.07).clamp(3.0, 5.0);
 
     // 1. Full 6-vertex symmetric bi-conical frustum path
     final outerPath = Path()
-      ..moveTo(centerX - collarHalfW, y)
-      ..lineTo(centerX + collarHalfW, y)
+      ..moveTo(centerX - collarHalfW, topY)
+      ..lineTo(centerX + collarHalfW, topY)
       ..lineTo(centerX + halfW, centerY)
-      ..lineTo(centerX + collarHalfW, y + height)
-      ..lineTo(centerX - collarHalfW, y + height)
+      ..lineTo(centerX + collarHalfW, bottomY)
+      ..lineTo(centerX - collarHalfW, bottomY)
       ..lineTo(centerX - halfW, centerY)
       ..close();
 
     // 2. Upper half facet path (top slope)
     final upperHalfPath = Path()
-      ..moveTo(centerX - collarHalfW, y)
-      ..lineTo(centerX + collarHalfW, y)
+      ..moveTo(centerX - collarHalfW, topY)
+      ..lineTo(centerX + collarHalfW, topY)
       ..lineTo(centerX + halfW, centerY)
       ..lineTo(centerX - halfW, centerY)
       ..close();
@@ -270,8 +276,8 @@ class SorobanPainter extends CustomPainter {
     final lowerHalfPath = Path()
       ..moveTo(centerX - halfW, centerY)
       ..lineTo(centerX + halfW, centerY)
-      ..lineTo(centerX + collarHalfW, y + height)
-      ..lineTo(centerX - collarHalfW, y + height)
+      ..lineTo(centerX + collarHalfW, bottomY)
+      ..lineTo(centerX - collarHalfW, bottomY)
       ..close();
 
     if (isHighlightGlow) {
@@ -295,7 +301,7 @@ class SorobanPainter extends CustomPainter {
               Color.lerp(topColor, Colors.black, 0.08)!,
               bottomColor,
             ],
-          ).createShader(Rect.fromLTWH(centerX - halfW, centerY, width, halfH)),
+          ).createShader(Rect.fromLTWH(centerX - halfW, centerY, scaledWidth, halfH)),
       );
 
       final borderPaint = Paint()
@@ -326,7 +332,7 @@ class SorobanPainter extends CustomPainter {
             Color.lerp(topColor, Colors.black, 0.06)!,
             bottomColor,
           ],
-        ).createShader(Rect.fromLTWH(centerX - halfW, centerY, width, halfH));
+        ).createShader(Rect.fromLTWH(centerX - halfW, centerY, scaledWidth, halfH));
       canvas.drawPath(lowerHalfPath, lowerPaint);
 
       // Subtle crisp outline
@@ -355,7 +361,7 @@ class SorobanPainter extends CustomPainter {
             Color.lerp(topColor, Colors.black, 0.03)!,
             bottomColor,
           ],
-        ).createShader(Rect.fromLTWH(centerX - halfW, centerY, width, halfH));
+        ).createShader(Rect.fromLTWH(centerX - halfW, centerY, scaledWidth, halfH));
       canvas.drawPath(lowerHalfPath, lowerPaint);
 
       // Very subtle quiet outline

@@ -20,11 +20,11 @@ class ResultScreen extends StatelessWidget {
       backgroundColor: SorobanTheme.backgroundColor,
       body: SafeArea(
         child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 24.0),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 12.0),
             child: Container(
-              constraints: const BoxConstraints(maxWidth: 580),
-              padding: const EdgeInsets.all(28),
+              constraints: const BoxConstraints(maxWidth: 540),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(20),
@@ -41,32 +41,32 @@ class ResultScreen extends StatelessWidget {
                 children: [
                   const Icon(
                     Icons.emoji_events_rounded,
-                    size: 64,
+                    size: 48,
                     color: SorobanTheme.beadActiveColor,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
                   const Text(
                     'TANTANGAN SELESAI!',
                     style: TextStyle(
-                      fontSize: 22,
+                      fontSize: 20,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.2,
                       color: SorobanTheme.frameColor,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   const Text(
                     'Hebat! Kamu telah menuntaskan 5 soal sempoa berturut-turut.',
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 13,
                       color: SorobanTheme.textMuted,
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 14),
                   // Time banner
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                     decoration: BoxDecoration(
                       color: SorobanTheme.backgroundColor,
                       borderRadius: BorderRadius.circular(12),
@@ -74,19 +74,19 @@ class ResultScreen extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.timer_rounded, size: 28, color: SorobanTheme.frameColor),
-                        const SizedBox(width: 10),
+                        const Icon(Icons.timer_rounded, size: 24, color: SorobanTheme.frameColor),
+                        const SizedBox(width: 8),
                         Text(
                           totalTimeFormatted,
                           style: SorobanTheme.monospaceDigitStyle.copyWith(
-                            fontSize: 32,
+                            fontSize: 28,
                             color: SorobanTheme.frameColor,
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 18),
                   // Actions
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -95,12 +95,12 @@ class ResultScreen extends StatelessWidget {
                         style: OutlinedButton.styleFrom(
                           foregroundColor: SorobanTheme.frameColor,
                           side: const BorderSide(color: SorobanTheme.frameColor, width: 1.5),
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        icon: const Icon(Icons.home_rounded),
+                        icon: const Icon(Icons.home_rounded, size: 20),
                         label: const Text('Menu Utama'),
                         onPressed: () {
                           Navigator.of(context).popUntil((route) => route.isFirst);
@@ -111,12 +111,12 @@ class ResultScreen extends StatelessWidget {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: SorobanTheme.beadActiveColor,
                           foregroundColor: SorobanTheme.frameColor,
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        icon: const Icon(Icons.refresh_rounded),
+                        icon: const Icon(Icons.refresh_rounded, size: 20),
                         label: const Text(
                           'Coba Lagi',
                           style: TextStyle(fontWeight: FontWeight.bold),

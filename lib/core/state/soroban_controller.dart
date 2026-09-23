@@ -354,7 +354,7 @@ class SorobanController extends ChangeNotifier {
     _activeCheckpointIndex = replayIdx;
     notifyListeners();
 
-    await Future.delayed(const Duration(milliseconds: 400));
+    await Future.delayed(const Duration(milliseconds: 1200));
 
     // 2. Play chained animation again
     await _playChainedMoves(replayResult.moves);
