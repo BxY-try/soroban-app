@@ -90,7 +90,47 @@ class SettingsScreen extends StatelessWidget {
 
                 const SizedBox(height: 16),
 
-                // 2. About Section
+                // 2. Interaction Section
+                Card(
+                  color: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Interaksi Manik',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: SorobanTheme.textDark,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        SwitchListTile(
+                          title: const Text(
+                            'Klik Manik (Tap to Toggle)',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: const Text(
+                            'Jika dinonaktifkan (default), manik hanya bisa digeser dengan drag seperti sempoa asli. Aktifkan bila ingin satu ketukan langsung memindahkan manik yang disentuh.',
+                            style: TextStyle(fontSize: 12, color: SorobanTheme.textMuted),
+                          ),
+                          activeThumbColor: SorobanTheme.beadActiveColor,
+                          value: controller.tapToToggleEnabled,
+                          onChanged: (_) => controller.toggleTapToToggle(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // 3. About Section
                 Card(
                   color: Colors.white,
                   shape: RoundedRectangleBorder(

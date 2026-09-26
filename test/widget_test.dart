@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:soroban_app/core/models/bead_move.dart';
 import 'package:soroban_app/core/models/problem.dart';
 import 'package:soroban_app/core/state/soroban_controller.dart';
@@ -222,12 +223,116 @@ void main() {
         .dy;
     expect(timerBadgeTop - soalBadgeBottom >= 10.0, isTrue);
 
-    // 3. Verify Soroban and problem text are horizontally aligned with sub-pixel precision (< 2.0px)
-    final sorobanCenter = tester.getCenter(find.byType(SorobanView)).dx;
-    final problemCenter = tester.getCenter(find.byKey(const Key('challenge_problem_text'))).dx;
-    expect((sorobanCenter - problemCenter).abs() < 2.0, isTrue);
+    // 3. The problem text must sit on the Soroban FRAME centre, not the widget
+    // box centre. Those two differ whenever the left and right frame gutters
+    // are asymmetric, which is exactly the case for the configured 0.99 left /
+    // 0.97 right gutters, so measuring against the box would hide a real
+    // misalignment. See the dedicated drift-guard test below for why this is
+    // asserted behaviourally rather than against the helper directly.
+    final sorobanBox = tester.getRect(find.byType(SorobanView));
+    final abacusLayout = SorobanLayout(
+      size: sorobanBox.size,
+      totalRods: controller.state.rods.length,
+    );
+    final frameCenter = sorobanBox.left + abacusLayout.frameRect.center.dx;
+    final problemCenter =
+        tester.getCenter(find.byKey(const Key('challenge_problem_text'))).dx;
+
+    expect((frameCenter - problemCenter).abs() < 2.0, isTrue,
+        reason: 'text should be centred on the painted abacus frame');
+
+    // Sanity: the frame really is off-centre inside its box right now, so the
+    // check above is not passing trivially by comparing two identical values.
+    final boxCenter = sorobanBox.center.dx;
+    expect(
+      (frameCenter - boxCenter).abs(),
+      greaterThan(1.0),
+      reason: 'asymmetric gutters should shift the frame centre off the box',
+    );
 
     await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  testWidgets(
+      'ChallengeScreen problem text tracks the abacus FRAME centre across screen sizes',
+      (tester) async {
+    // Guards _abacusFrameFor against the layout chain drifting away from it:
+    // the text follows the helper, so if the chain changes shape the text stops
+    // matching the real box and this fails.
+    //
+    // NOTE ON WHAT THIS DOES *NOT* ASSERT
+    //
+    // _abacusFrameFor() and _problemTextLeftFor() are private to
+    // _ChallengeScreenState, so this file cannot call them and compare their
+    // return values. The assertions below are therefore behavioural: they build
+    // the real screen, read the box Flutter actually laid out, rebuild the
+    // painted frame from it, and check the text landed on that frame's centre.
+    //
+    // That covers the same regression from the outside — a layout chain that
+    // no longer matches the helper moves the text away from the real frame — and
+    // it stays valid across screen sizes, but it does NOT pin the helper's own
+    // arithmetic (for example it would not catch the helper returning the right
+    // answer for the wrong reason). If direct coverage of the helper is ever
+    // wanted, extract it together with the four layout constants
+    // (_groupHorizontalPadding, _leftPanelWidth, _leftPanelGap,
+    // _problemTextRightInset) into a public class, then add unit tests against
+    // it here. Until then, do not "simplify" this test into comparing the text
+    // against the widget box centre again: that is exactly the mistake that let
+    // a 17px visual misalignment pass while this assertion stayed green.
+    final controller = SorobanController();
+    controller.startChallengeSession(ProblemCategory.addition, Difficulty.easy);
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    for (final screen in [
+      const Size(360, 800),
+      const Size(400, 800),
+      const Size(412, 915),
+      const Size(1280, 720),
+    ]) {
+      tester.view.physicalSize = screen;
+      tester.view.devicePixelRatio = 1.0;
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: controller,
+          child: MaterialApp(
+            theme: SorobanTheme.themeData,
+            home: const ChallengeScreen(),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final box = tester.getRect(find.byType(SorobanView));
+      final layout = SorobanLayout(
+        size: box.size,
+        totalRods: controller.state.rods.length,
+      );
+      final frameCenter = box.left + layout.frameRect.center.dx;
+      final problemCenter =
+          tester.getCenter(find.byKey(const Key('challenge_problem_text'))).dx;
+
+      expect(
+        (frameCenter - problemCenter).abs(),
+        lessThan(1.0),
+        reason: 'text should be centred on the abacus frame at $screen',
+      );
+
+      // The frame centre must differ from the box centre, otherwise this test
+      // would be satisfied by the old box-centred behaviour.
+      expect(
+        (frameCenter - box.center.dx).abs(),
+        greaterThan(0.5),
+        reason: 'asymmetric gutters should shift the frame off the box centre at $screen',
+      );
+
+      await tester.pumpWidget(const SizedBox());
+    }
+
+    // Disposed explicitly, not via addTearDown: the framework verifies there are
+    // no pending timers before tearDown runs, and startChallengeSession leaves a
+    // repeating timer behind.
     controller.dispose();
   });
 
@@ -392,5 +497,120 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
     }
+  });
+
+  testWidgets('SorobanView beads are drag-only until "Klik Manik" is enabled',
+      (tester) async {
+    tester.view.physicalSize = const Size(480, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    /// Boots a real controller (so the setting comes from persisted prefs, not
+    /// a back door) and pumps a bare abacus sized 320x600.
+    Future<SorobanController> pumpAbacus({required bool tapEnabled}) async {
+      SharedPreferences.setMockInitialValues(
+        tapEnabled ? {'tap_to_toggle_enabled': true} : {},
+      );
+      final controller = SorobanController();
+      addTearDown(() => controller.dispose());
+      await controller.init(initAudio: false);
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: controller,
+          child: MaterialApp(
+            theme: SorobanTheme.themeData,
+            home: const Scaffold(
+              body: Center(
+                child: SizedBox(
+                  width: 320,
+                  height: 600,
+                  child: SorobanView(showDigitalReadout: false),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      return controller;
+    }
+
+    /// Global position of the heaven bead on [rodIndex], derived from the very
+    /// same layout the painter uses.
+    Offset heavenBeadCenter(int rodIndex) {
+      final canvas = find
+          .descendant(
+            of: find.byType(SorobanView),
+            matching: find.byType(CustomPaint),
+          )
+          .first;
+      final layout = SorobanLayout(
+        size: tester.getSize(canvas),
+        totalRods: 7,
+      );
+      return tester.getTopLeft(canvas) +
+          Offset(
+            layout.rodCenterX(rodIndex),
+            layout.computeHeavenY(false) + (layout.beadHeight / 2),
+          );
+    }
+
+    // Default (flag OFF): tapping straight onto a bead must do nothing.
+    final dragOnly = await pumpAbacus(tapEnabled: false);
+    expect(dragOnly.tapToToggleEnabled, isFalse);
+
+    await tester.tapAt(heavenBeadCenter(0));
+    await tester.pumpAndSettle();
+    expect(dragOnly.state.rods[0].heaven, isFalse);
+    expect(dragOnly.state.value, equals(0));
+
+    await tester.pumpWidget(const SizedBox());
+
+    // Opted in: the exact same tap now moves the bead.
+    final tappable = await pumpAbacus(tapEnabled: true);
+    expect(tappable.tapToToggleEnabled, isTrue);
+
+    await tester.tapAt(heavenBeadCenter(0));
+    await tester.pumpAndSettle();
+    expect(tappable.state.rods[0].heaven, isTrue);
+    // Heaven bead carries 5, so rod 0 now reads 5 (not 1).
+    expect(tappable.state.value, equals(5));
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('SettingsScreen exposes the "Klik Manik" toggle', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final controller = SorobanController();
+    addTearDown(() => controller.dispose());
+    await controller.init(initAudio: false);
+
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const SettingsScreen(),
+        ),
+      ),
+    );
+
+    expect(find.text('Interaksi Manik'), findsOneWidget);
+
+    final tile = find.widgetWithText(SwitchListTile, 'Klik Manik (Tap to Toggle)');
+    expect(tile, findsOneWidget);
+    expect(tester.widget<SwitchListTile>(tile).value, isFalse);
+
+    // The switch flips the controller, i.e. the gesture gate in SorobanView.
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    expect(controller.tapToToggleEnabled, isTrue);
+    expect(tester.widget<SwitchListTile>(tile).value, isTrue);
+
+    expect(tester.takeException(), isNull);
   });
 }

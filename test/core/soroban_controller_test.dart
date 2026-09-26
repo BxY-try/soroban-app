@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:soroban_app/core/models/bead_move.dart';
 import 'package:soroban_app/core/models/problem.dart';
 import 'package:soroban_app/core/state/soroban_controller.dart';
@@ -135,6 +136,58 @@ void main() {
       // Reset restores mistake to 0
       controller.executeReset();
       expect(controller.state.value, equals(0));
+    });
+  });
+
+  group('SorobanController tap-to-toggle setting', () {
+    test('is off by default, so beads stay drag-only', () {
+      final controller = SorobanController();
+      addTearDown(() => controller.dispose());
+
+      expect(controller.tapToToggleEnabled, isFalse);
+    });
+
+    test('toggleTapToToggle flips the flag and persists it', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      SharedPreferences.setMockInitialValues({});
+
+      final controller = SorobanController();
+      addTearDown(() => controller.dispose());
+      await controller.init();
+
+      controller.toggleTapToToggle();
+      expect(controller.tapToToggleEnabled, isTrue);
+      // Let the async persist settle before reading the store back.
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        (await SharedPreferences.getInstance()).getBool('tap_to_toggle_enabled'),
+        isTrue,
+      );
+
+      controller.toggleTapToToggle();
+      expect(controller.tapToToggleEnabled, isFalse);
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        (await SharedPreferences.getInstance()).getBool('tap_to_toggle_enabled'),
+        isFalse,
+      );
+    });
+
+    test('init restores a previously enabled choice, and defaults to off otherwise',
+        () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      SharedPreferences.setMockInitialValues({'tap_to_toggle_enabled': true});
+
+      final enabled = SorobanController();
+      addTearDown(() => enabled.dispose());
+      await enabled.init();
+      expect(enabled.tapToToggleEnabled, isTrue);
+
+      SharedPreferences.setMockInitialValues({});
+      final fresh = SorobanController();
+      addTearDown(() => fresh.dispose());
+      await fresh.init();
+      expect(fresh.tapToToggleEnabled, isFalse);
     });
   });
 }

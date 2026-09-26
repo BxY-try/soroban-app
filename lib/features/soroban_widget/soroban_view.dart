@@ -12,6 +12,8 @@ import 'soroban_painter.dart';
 /// Supports two gesture modes that resolve automatically via Flutter's
 /// gesture arena:
 /// - **Quick tap** (pointer up before drag slop): toggles targeted bead.
+///   Opt-in via `SorobanController.tapToToggleEnabled` (off by default), so
+///   this mode is simply not registered when the user keeps beads drag-only.
 /// - **Sustained drag** (pointer moves beyond slop): beads follow the
 ///   cursor/finger in real-time with 1D rigid body push physics, committing on release.
 class SorobanView extends StatefulWidget {
@@ -148,9 +150,12 @@ class _SorobanViewState extends State<SorobanView>
         _lastSize = constraints.biggest;
 
         return GestureDetector(
-          // Quick tap: fires when pointer lifts before exceeding drag slop
-          onTapUp: (details) =>
-              _handleTap(details.localPosition, controller),
+          // Quick tap: fires when pointer lifts before exceeding drag slop.
+          // Opt-in only (default OFF): beads are drag-only unless the user
+          // enables "Klik Manik" in Settings.
+          onTapUp: controller.tapToToggleEnabled
+              ? (details) => _handleTap(details.localPosition, controller)
+              : null,
           // Sustained drag: fires when pointer moves beyond drag slop
           onVerticalDragStart: (details) =>
               _onDragStart(details, controller),

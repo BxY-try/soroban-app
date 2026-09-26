@@ -80,16 +80,32 @@ class SorobanController extends ChangeNotifier {
   bool _soundEnabled = true;
   bool get soundEnabled => _soundEnabled;
 
+  /// Whether a bead can be moved by a simple tap/click instead of a drag.
+  ///
+  /// Off by default: beads are drag-only, the way a real soroban is used. The
+  /// user can opt in from Settings ("Klik Manik"), and the choice is persisted.
+  /// Drag stays available in both cases, this only gates the tap shortcut.
+  bool _tapToToggleEnabled = false;
+  bool get tapToToggleEnabled => _tapToToggleEnabled;
+
   final Map<String, int> _bestTimes = {}; // key: "category_difficulty" -> ms
 
   /// Initializes persistence and audio service.
-  Future<void> init() async {
+  ///
+  /// [initAudio] exists because the audio plugin bootstrap is a platform
+  /// channel call that never resolves inside `testWidgets`' fake-async zone,
+  /// hanging the whole test. Widget tests pass `false` and get the preference
+  /// restore only.
+  Future<void> init({bool initAudio = true}) async {
     final prefs = await SharedPreferences.getInstance();
     _perRodColor = prefs.getBool('per_rod_color') ?? false;
     _soundEnabled = prefs.getBool('sound_enabled') ?? true;
+    _tapToToggleEnabled = prefs.getBool('tap_to_toggle_enabled') ?? false;
 
     SoundService().enabled = _soundEnabled;
-    await SoundService().init();
+    if (initAudio) {
+      await SoundService().init();
+    }
 
     for (final cat in ProblemCategory.values) {
       for (final diff in Difficulty.values) {
@@ -116,6 +132,16 @@ class SorobanController extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('per_rod_color', _perRodColor);
+  }
+
+  /// Enables/disables the tap-to-toggle shortcut. Does NOT gate [tapHeavenBead]
+  /// / [tapEarthBead] themselves, because the drag handler commits its moves
+  /// through those very same methods.
+  void toggleTapToToggle() async {
+    _tapToToggleEnabled = !_tapToToggleEnabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('tap_to_toggle_enabled', _tapToToggleEnabled);
   }
 
   int? getBestTime(ProblemCategory cat, Difficulty diff) {
