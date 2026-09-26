@@ -27,6 +27,19 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
   /// reads slightly larger than the surrounding chrome while keeping safe margins.
   static const double sorobanScale = 0.992;
 
+  /// Lifts the whole Soroban block (abacus frame + digital readout) upward by this
+  /// many pixels so the space below it is no longer cramped.
+  ///
+  /// Applied as a paint transform on purpose: the box keeps the exact layout
+  /// constraints it had before, so the frame dimensions and the bead size are
+  /// untouched — unlike a bottom/top padding change, which would take the height
+  /// away from the abacus and shrink the beads.
+  static const double sorobanLift = 5.0;
+
+  /// Extra bead travel (px) granted to each deck, widening the heaven↔beam and
+  /// beam↔earth gaps at the cost of bead height.
+  static const double sorobanTravelBoost = 1.95;
+
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<SorobanController>();
@@ -59,7 +72,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
               // Main Interactive Group: Left controls (SOAL, Timer, Reset) + Central Soroban View
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
+                  padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 2.0),
                   child: Center(
                     child: FractionallySizedBox(
                       widthFactor: groupScale,
@@ -71,16 +84,21 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
                           const SizedBox(width: 12),
 
                           // Central Soroban View (Centered to align exactly with problem equation)
-                          const Expanded(
+                          Expanded(
                             child: Padding(
-                              padding: EdgeInsets.only(bottom: 2.0),
+                              padding: const EdgeInsets.only(bottom: 2.0),
                               child: Center(
-                                child: FractionallySizedBox(
-                                  widthFactor: sorobanScale,
-                                  heightFactor: sorobanScale,
-                                  child: AspectRatio(
-                                    aspectRatio: 2.05,
-                                    child: SorobanView(),
+                                child: Transform.translate(
+                                  offset: const Offset(0, -sorobanLift),
+                                  child: const FractionallySizedBox(
+                                    widthFactor: sorobanScale,
+                                    heightFactor: sorobanScale,
+                                    child: AspectRatio(
+                                      aspectRatio: 2.05,
+                                      child: SorobanView(
+                                        travelBoost: sorobanTravelBoost,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),

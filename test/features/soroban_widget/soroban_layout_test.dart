@@ -160,5 +160,57 @@ void main() {
       final draggedY = layout.computeHeavenDragY(false, 20.0);
       expect(draggedY, equals(inactiveY + 20.0));
     });
+
+    test('Zero travel boost reproduces the original geometry', () {
+      final explicit = SorobanLayout(
+        size: size,
+        totalRods: totalRods,
+        travelBoost: 0.0,
+      );
+
+      expect(explicit.beadHeight, closeTo(layout.beadHeight, 0.0001));
+      expect(explicit.travelDistance, closeTo(layout.travelDistance, 0.0001));
+      expect(explicit.beamTop, closeTo(layout.beamTop, 0.0001));
+      expect(explicit.beamBottom, closeTo(layout.beamBottom, 0.0001));
+    });
+
+    test('Travel boost absorbs 2x its own height without resizing the beads', () {
+      const boost = 1.95;
+      final boosted = SorobanLayout(
+        size: Size(size.width, size.height + 2 * boost),
+        totalRods: totalRods,
+        travelBoost: boost,
+      );
+
+      expect(boosted.beadHeight, closeTo(layout.beadHeight, 0.001));
+      expect(boosted.beadWidth, closeTo(layout.beadWidth, 0.001));
+      expect(boosted.beadPitch, closeTo(layout.beadPitch, 0.001));
+      expect(
+        boosted.travelDistance,
+        closeTo(layout.travelDistance + boost, 0.001),
+      );
+
+      // Symmetry between both decks survives the boost.
+      final heavenTravel = boosted.computeHeavenY(true) - boosted.computeHeavenY(false);
+      expect(heavenTravel, closeTo(boosted.travelDistance, 0.001));
+      for (int b = 0; b < 4; b++) {
+        final earthTravel = boosted.computeEarthY(b, 0) - boosted.computeEarthY(b, 4);
+        expect(earthTravel, closeTo(boosted.travelDistance, 0.001));
+      }
+    });
+
+    test('Boosted layout still fills the full inner board height', () {
+      final boosted = SorobanLayout(
+        size: size,
+        totalRods: totalRods,
+        travelBoost: 1.95,
+      );
+
+      // Upper deck + beam + lower deck must exactly fill the inner board.
+      final total = boosted.upperDeckHeight +
+          SorobanLayout.beamHeight +
+          boosted.lowerDeckHeight;
+      expect(total, closeTo(size.height - 2 * SorobanLayout.frameBorder, 0.001));
+    });
   });
 }

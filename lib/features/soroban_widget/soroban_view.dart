@@ -17,9 +17,16 @@ import 'soroban_painter.dart';
 class SorobanView extends StatefulWidget {
   final bool showDigitalReadout;
 
+  /// Extra bead travel (px) granted to each deck. Pair it with a widget that is
+  /// exactly `2 * travelBoost` taller than the un-boosted variant to grow the
+  /// empty gap between the heaven/earth decks and the beam without resizing the
+  /// beads. 0.0 keeps the default behaviour where travel follows bead size.
+  final double travelBoost;
+
   const SorobanView({
     super.key,
     this.showDigitalReadout = true,
+    this.travelBoost = 0.0,
   });
 
   @override
@@ -103,7 +110,11 @@ class _SorobanViewState extends State<SorobanView>
   }
 
   SorobanLayout _getLayout(int totalRods) {
-    return SorobanLayout(size: _lastSize, totalRods: totalRods);
+    return SorobanLayout(
+      size: _lastSize,
+      totalRods: totalRods,
+      travelBoost: widget.travelBoost,
+    );
   }
 
   // ── Build ───────────────────────────────────────────────────
@@ -154,6 +165,7 @@ class _SorobanViewState extends State<SorobanView>
               perRodColor: controller.perRodColor,
               animatingBeadKey: controller.animatingBeadKey,
               trailBeads: controller.trailBeads,
+              travelBoost: widget.travelBoost,
               // Slide animation data
               previousState: _previousState,
               animationProgress: _curvedAnim.value,

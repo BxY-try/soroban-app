@@ -6,6 +6,7 @@ import 'package:soroban_app/core/models/problem.dart';
 import 'package:soroban_app/core/state/soroban_controller.dart';
 import 'package:soroban_app/features/challenge/challenge_screen.dart';
 import 'package:soroban_app/features/challenge/mode_select_screen.dart';
+import 'package:soroban_app/features/soroban_widget/soroban_layout.dart';
 import 'package:soroban_app/features/soroban_widget/soroban_view.dart';
 import 'package:soroban_app/shared/theme.dart';
 
@@ -316,5 +317,80 @@ void main() {
     expect(find.text('Menu Utama'), findsOneWidget);
     expect(find.text('Coba Lagi'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('ChallengeScreen Soroban keeps beads stable while travel grows across sizes',
+      (tester) async {
+    // Tight phone landscape up to a wide tablet-ish landscape, exercising both
+    // the height-limited and the width-limited branch of the Soroban box.
+    for (final viewport in [const Size(640, 360), const Size(1280, 720)]) {
+      final controller = SorobanController();
+      controller.startChallengeSession(ProblemCategory.addition, Difficulty.easy);
+
+      tester.view.physicalSize = viewport;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() => tester.view.resetPhysicalSize());
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: controller,
+          child: MaterialApp(
+            theme: SorobanTheme.themeData,
+            home: const ChallengeScreen(),
+          ),
+        ),
+      );
+
+      expect(find.byType(SorobanView), findsOneWidget, reason: 'at $viewport');
+      final boost = tester.widget<SorobanView>(find.byType(SorobanView)).travelBoost;
+      expect(boost, greaterThan(0), reason: 'travel boost must be wired at $viewport');
+
+      // The block (abacus frame + digital readout) keeps a comfortable clearance
+      // above the screen bottom and stays balanced against the space left under
+      // the problem text above it.
+      final block = tester.getRect(find.byType(SorobanView));
+      final textBottom =
+          tester.getBottomLeft(find.byKey(const Key('challenge_problem_text'))).dy;
+      final clearanceBottom = viewport.height - block.bottom;
+      expect(clearanceBottom, greaterThanOrEqualTo(12.0), reason: 'clearance at $viewport');
+      expect(
+        (block.top - textBottom - clearanceBottom).abs(),
+        lessThan(4.0),
+        reason: 'vertical balance at $viewport',
+      );
+
+      final canvas = tester.getSize(
+        find
+            .descendant(of: find.byType(SorobanView), matching: find.byType(CustomPaint))
+            .first,
+      );
+      final plain = SorobanLayout(size: canvas, totalRods: 7);
+      final boosted = SorobanLayout(
+        size: canvas,
+        totalRods: 7,
+        travelBoost: boost,
+      );
+
+      // The travel path is roomier (by ~0.79 * boost, since the same px also
+      // shrink the proportional part of the travel)...
+      final travelGain = boosted.travelDistance - plain.travelDistance;
+      expect(travelGain, greaterThan(1.0), reason: 'travel at $viewport');
+      expect(travelGain, lessThan(boost), reason: 'travel at $viewport');
+      // ...and it is paid for purely by the bead budget, so the 2x height the
+      // screen grants keeps the beads at their previous size.
+      expect(
+        plain.beadHeight - boosted.beadHeight,
+        closeTo(2 * boost / (5.0 + 2.0 * SorobanLayout.travelRatio), 0.001),
+        reason: 'bead height delta at $viewport',
+      );
+      // Bead width only depends on the available width, which never changed.
+      expect(boosted.beadWidth, closeTo(plain.beadWidth, 0.001),
+          reason: 'bead width at $viewport');
+
+      expect(tester.takeException(), isNull, reason: 'overflow at $viewport');
+
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    }
   });
 }

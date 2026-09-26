@@ -32,6 +32,10 @@ class SorobanPainter extends CustomPainter {
   /// Exact floating Y position of the heaven bead during drag.
   final double? dragHeavenY;
 
+  /// Extra bead travel (px) granted to each deck, paid for by the bead budget
+  /// so beads keep their size when the widget grows. See [SorobanLayout].
+  final double travelBoost;
+
   SorobanPainter({
     required this.state,
     required this.perRodColor,
@@ -42,6 +46,7 @@ class SorobanPainter extends CustomPainter {
     this.dragRodIndex,
     this.dragEarthY,
     this.dragHeavenY,
+    this.travelBoost = 0.0,
   });
 
   // Layout constants forwarded from SorobanLayout for backward compatibility
@@ -56,7 +61,11 @@ class SorobanPainter extends CustomPainter {
     if (size.width <= 0 || size.height <= 0) return;
 
     final totalRods = state.rods.length;
-    final layout = SorobanLayout(size: size, totalRods: totalRods);
+    final layout = SorobanLayout(
+      size: size,
+      totalRods: totalRods,
+      travelBoost: travelBoost,
+    );
 
     // Draw background
     final bgPaint = Paint()..color = SorobanTheme.backgroundColor;

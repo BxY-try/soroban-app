@@ -19,6 +19,20 @@ class SorobanLayout {
   final Size size;
   final int totalRods;
 
+  /// Extra bead travel (px) added to EACH deck on top of the proportional
+  /// [travelRatio], taken from the bead budget so bead size stays put.
+  ///
+  /// The vertical budget is exactly saturated:
+  /// `h = 2*frameBorder + beamHeight + 3*beadGap + 4*deckPadding + 5*beadHeight + 2*travel`
+  /// so any extra height handed to the widget would otherwise inflate the beads.
+  /// Growing the widget by `2 * travelBoost` therefore widens the empty gap
+  /// between each deck and the beam while [beadHeight] and [beadWidth] remain
+  /// exactly the same — and because the boost is a fixed pixel value the result
+  /// is identical on every screen size.
+  ///
+  /// 0.0 keeps the original behaviour: travel is purely proportional to bead size.
+  final double travelBoost;
+
   final Rect innerRect;
   final double rodSpacing;
   final double upperDeckHeight;
@@ -37,20 +51,25 @@ class SorobanLayout {
     );
   }
 
-  static double _computeBeadHeight(double sizeHeight) {
+  static double _computeBeadHeight(double sizeHeight, double travelBoost) {
     final available = _computeAvailableDeckHeight(sizeHeight);
     final fixedSpace = 3 * beadGap + 4 * deckPadding;
-    final raw = (available - fixedSpace) / (5.0 + 2.0 * travelRatio);
+    // Both decks donate their travel boost to the bead budget, which is what
+    // keeps bead size constant while the widget grows.
+    final raw =
+        (available - fixedSpace - 2 * travelBoost) / (5.0 + 2.0 * travelRatio);
     return math.max(16.0, raw);
   }
 
-  static double _computeTravelDistance(double sizeHeight) {
-    return _computeBeadHeight(sizeHeight) * travelRatio;
+  static double _computeTravelDistance(double sizeHeight, double travelBoost) {
+    return _computeBeadHeight(sizeHeight, travelBoost) * travelRatio +
+        travelBoost;
   }
 
   SorobanLayout({
     required this.size,
     required this.totalRods,
+    this.travelBoost = 0.0,
   })  : innerRect = Rect.fromLTWH(
           frameBorder,
           frameBorder,
@@ -60,28 +79,28 @@ class SorobanLayout {
         rodSpacing = totalRods > 0
             ? math.max(0.0, size.width - frameBorder * 2) / totalRods
             : 0.0,
-        beadHeight = _computeBeadHeight(size.height),
-        travelDistance = _computeTravelDistance(size.height),
-        beadPitch = _computeBeadHeight(size.height) + beadGap,
+        beadHeight = _computeBeadHeight(size.height, travelBoost),
+        travelDistance = _computeTravelDistance(size.height, travelBoost),
+        beadPitch = _computeBeadHeight(size.height, travelBoost) + beadGap,
         beadWidth = ((totalRods > 0
                     ? math.max(0.0, size.width - frameBorder * 2) / totalRods
                     : 0.0) *
                 0.84)
             .clamp(18.0, 125.0),
-        upperDeckHeight = _computeBeadHeight(size.height) +
-            _computeTravelDistance(size.height) +
+        upperDeckHeight = _computeBeadHeight(size.height, travelBoost) +
+            _computeTravelDistance(size.height, travelBoost) +
             2 * deckPadding,
-        lowerDeckHeight = 4 * _computeBeadHeight(size.height) +
+        lowerDeckHeight = 4 * _computeBeadHeight(size.height, travelBoost) +
             3 * beadGap +
-            _computeTravelDistance(size.height) +
+            _computeTravelDistance(size.height, travelBoost) +
             2 * deckPadding,
         beamTop = frameBorder +
-            _computeBeadHeight(size.height) +
-            _computeTravelDistance(size.height) +
+            _computeBeadHeight(size.height, travelBoost) +
+            _computeTravelDistance(size.height, travelBoost) +
             2 * deckPadding,
         beamBottom = frameBorder +
-            _computeBeadHeight(size.height) +
-            _computeTravelDistance(size.height) +
+            _computeBeadHeight(size.height, travelBoost) +
+            _computeTravelDistance(size.height, travelBoost) +
             2 * deckPadding +
             beamHeight;
 
