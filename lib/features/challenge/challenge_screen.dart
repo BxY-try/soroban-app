@@ -4,6 +4,7 @@ import '../../core/models/problem.dart';
 import '../../core/state/soroban_controller.dart';
 import '../../shared/theme.dart';
 import '../settings/settings_screen.dart';
+import '../soroban_widget/soroban_layout.dart';
 import '../soroban_widget/soroban_view.dart';
 import 'result_screen.dart';
 
@@ -45,6 +46,70 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
   /// default 0.0 and is therefore unaffected.
   static const double sorobanTravelBoost = 3.92;
 
+  // ── Main area layout chain ─────────────────────────────────────────
+  // These four values define how the Soroban is positioned horizontally.
+  // They are used BOTH by the layout chain itself and by [_abacusFrameFor], so
+  // the problem text can be centred on the abacus without duplicating numbers.
+
+  /// Horizontal padding around the whole left-panel + Soroban group.
+  static const double _groupHorizontalPadding = 10.0;
+
+  /// Fixed width of the left control panel.
+  static const double _leftPanelWidth = 56.0;
+
+  /// Gap between the left control panel and the Soroban.
+  static const double _leftPanelGap = 12.0;
+
+  /// Margin kept between the problem text and the right screen edge.
+  static const double _problemTextRightInset = 10.0;
+
+  /// Horizontal geometry of the painted Soroban for a content area
+  /// [contentWidth] px wide.
+  ///
+  /// Mirrors, value for value, the layout chain that positions the SorobanView:
+  /// group padding, [groupScale] on the whole group, the fixed left panel plus
+  /// [_leftPanelGap], then [sorobanScale] on the Soroban itself.
+  ///
+  /// Both the layout chain and this function read the constants above, and
+  /// `widget_test.dart` asserts the problem text lands on the *actually laid out*
+  /// frame centre at several screen sizes. That assertion is the drift guard: if
+  /// the chain ever changes shape, the text follows this function instead of the
+  /// real box, and that test fails.
+  ///
+  /// [frameCenter] is the centre of the *painted frame*, which is NOT the centre
+  /// of the box whenever the left and right gutters differ. That is exactly the
+  /// value the problem text should sit on.
+  static ({double left, double width, double frameCenter}) _abacusFrameFor(
+    double contentWidth,
+  ) {
+    final avail = contentWidth - 2 * _groupHorizontalPadding;
+    final groupWidth = avail * groupScale;
+    final groupLeft = _groupHorizontalPadding + (avail - groupWidth) / 2;
+
+    final slotWidth = groupWidth - _leftPanelWidth - _leftPanelGap;
+    final boxWidth = slotWidth > 0.0 ? slotWidth * sorobanScale : 0.0;
+    final boxLeft = groupLeft + _leftPanelWidth + _leftPanelGap +
+        (slotWidth - boxWidth) / 2;
+
+    // The frame is inset by the SorobanLayout gutters, which may be asymmetric.
+    final gutters = SorobanLayout.guttersFor(boxWidth);
+    final frameCenter =
+        boxLeft + boxWidth / 2 + (gutters.left - gutters.right) / 2;
+
+    return (left: boxLeft, width: boxWidth, frameCenter: frameCenter);
+  }
+
+  /// Left inset of the problem text band that centres it on the abacus frame
+  /// while keeping [_problemTextRightInset] free on the right.
+  ///
+  /// With symmetric gutters this returns the historical 78.0 exactly, so turning
+  /// both gutter scales to 1.0 restores the previous layout bit for bit.
+  static double _problemTextLeftFor(double contentWidth) {
+    return 2 * _abacusFrameFor(contentWidth).frameCenter -
+        contentWidth +
+        _problemTextRightInset;
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<SorobanController>();
@@ -77,7 +142,10 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
               // Main Interactive Group: Left controls (SOAL, Timer, Reset) + Central Soroban View
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 2.0),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: _groupHorizontalPadding,
+                    vertical: 2.0,
+                  ),
                   child: Center(
                     child: FractionallySizedBox(
                       widthFactor: groupScale,
@@ -86,9 +154,11 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
                         children: [
                           _buildLeftPanel(context, controller),
 
-                          const SizedBox(width: 12),
+                          const SizedBox(width: _leftPanelGap),
 
-                          // Central Soroban View (Centered to align exactly with problem equation)
+                          // Central Soroban View. It is centred inside this slot;
+                          // the problem text above is what chases the painted
+                          // frame centre, not the other way round.
                           Expanded(
                             child: Padding(
                               padding: const EdgeInsets.only(bottom: 2.0),
@@ -212,14 +282,21 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
             ),
           ),
 
-          // 3. Problem text aligned with Soroban center axis (between left 78.0 and right 10.0)
-          Positioned(
-            left: 78.0,
-            right: 10.0,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: _buildProblemText(controller),
+          // 3. Problem text centred on the Soroban FRAME centre.
+          //
+          // The frame centre is not the box centre when the left and right
+          // frame gutters differ, so the band is derived from
+          // _problemTextLeftFor instead of a hard-coded 78.0. With symmetric
+          // gutters that helper returns 78.0 again, so this is a no-op then.
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) => Padding(
+                padding: EdgeInsets.only(
+                  left: _problemTextLeftFor(constraints.maxWidth),
+                  right: _problemTextRightInset,
+                ),
+                child: Center(child: _buildProblemText(controller)),
+              ),
             ),
           ),
         ],
@@ -408,7 +485,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
   /// 3. Spacer mendorong tombol Reset ke bawah
   /// 4. Tombol Reset dinaikkan lagi (bottom padding 44px)
   Widget _buildLeftPanel(BuildContext context, SorobanController controller) {
-    const panelWidth = 56.0;
+    const panelWidth = _leftPanelWidth;
     return SizedBox(
       width: panelWidth,
       child: Column(
