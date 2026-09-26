@@ -38,7 +38,12 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
 
   /// Extra bead travel (px) granted to each deck, widening the heaven↔beam and
   /// beam↔earth gaps at the cost of bead height.
-  static const double sorobanTravelBoost = 1.95;
+  ///
+  /// Sized so the beads land at ~8% above the pre-scale-bump baseline (the
+  /// bigger scale requested in 457418a would otherwise inflate them by ~10%,
+  /// because the vertical budget is exactly saturated). Practice mode keeps the
+  /// default 0.0 and is therefore unaffected.
+  static const double sorobanTravelBoost = 3.92;
 
   @override
   Widget build(BuildContext context) {
