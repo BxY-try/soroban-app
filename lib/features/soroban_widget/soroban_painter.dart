@@ -68,12 +68,16 @@ class SorobanPainter extends CustomPainter {
     );
 
     // Draw background
+    // Painted across the whole widget box, not just [layout.frameRect], so the
+    // strips freed by the SorobanLayout gutters blend seamlessly into the
+    // surrounding app background.
     final bgPaint = Paint()..color = SorobanTheme.backgroundColor;
     canvas.drawRect(Offset.zero & size, bgPaint);
 
-    // Soroban outer frame bounds
+    // Soroban outer frame bounds. Offsets and widths come straight from
+    // SorobanLayout, which pins either edge depending on which gutter is set.
     final sorobanRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(0, 0, size.width, size.height),
+      layout.frameRect,
       const Radius.circular(10),
     );
 

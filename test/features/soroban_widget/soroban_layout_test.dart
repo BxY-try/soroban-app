@@ -213,4 +213,230 @@ void main() {
       expect(total, closeTo(size.height - 2 * SorobanLayout.frameBorder, 0.001));
     });
   });
+
+  group('SorobanLayout horizontal gutters', () {
+    // A real phone-sized abacus box (Challenge mode on a 400x800 screen).
+    const phoneSize = Size(301.96, 604.0);
+    const rods = 7;
+
+    /// The un-shrunk reference the hard constraints are defined against.
+    double referenceBeadWidth(Size s, int totalRods) =>
+        ((s.width - 2 * SorobanLayout.frameBorder) / totalRods * 0.84)
+            .clamp(18.0, 125.0);
+
+    /// Upper deck + beam + lower deck, i.e. the full vertical budget.
+    double verticalTotal(SorobanLayout l) =>
+        l.upperDeckHeight + SorobanLayout.beamHeight + l.lowerDeckHeight;
+
+    /// Builds a layout with an explicit gutter pair so every mode is testable
+    /// without editing the configured constants.
+    SorobanLayout build({double? left, double? right}) => SorobanLayout(
+          size: phoneSize,
+          totalRods: rods,
+          spacingScaleLeft: left,
+          spacingScaleRight: right,
+        );
+
+    group('no gutters (both scales 1.0) reproduces the original layout', () {
+      test('the frame fills the whole widget box', () {
+        final l = build(left: 1.0, right: 1.0);
+
+        expect(l.frameRect.left, equals(0.0));
+        expect(l.frameRect.right, equals(phoneSize.width));
+        expect(l.frameRect.width, equals(phoneSize.width));
+        expect(l.leftShrink, equals(0.0));
+        expect(l.rightShrink, equals(0.0));
+        expect(l.innerRect.left, equals(SorobanLayout.frameBorder));
+        expect(l.rodSpacing, equals((phoneSize.width - 24) / rods));
+      });
+    });
+
+    group('right gutter only (left anchored)', () {
+      const right = 0.95;
+      final l = SorobanLayout(
+        size: phoneSize,
+        totalRods: rods,
+        spacingScaleLeft: 1.0,
+        spacingScaleRight: right,
+      );
+
+      test('the left edge never moves and the right edge is pulled in', () {
+        expect(l.frameRect.left, equals(0.0));
+        expect(l.innerRect.left, equals(SorobanLayout.frameBorder));
+        expect(l.rightShrink, greaterThan(0.0));
+        expect(l.frameRect.right, closeTo(phoneSize.width - l.rightShrink, 0.001));
+        expect(l.frameRect.right, lessThan(phoneSize.width));
+        expect(l.leftShrink, equals(0.0));
+      });
+
+      test('the pitch is scaled by exactly the right scale', () {
+        final reference = (phoneSize.width - 2 * SorobanLayout.frameBorder) / rods;
+        expect(l.rodSpacing, closeTo(reference * right, 0.0001));
+      });
+    });
+
+    group('left gutter only (right anchored mirror)', () {
+      const left = 0.95;
+      final l = SorobanLayout(
+        size: phoneSize,
+        totalRods: rods,
+        spacingScaleLeft: left,
+        spacingScaleRight: 1.0,
+      );
+
+      test('the right edge never moves and the left edge is pulled in', () {
+        expect(l.frameRect.right, equals(phoneSize.width));
+        expect(l.rightShrink, equals(0.0));
+        expect(l.leftShrink, greaterThan(0.0));
+        expect(l.frameRect.left, closeTo(l.leftShrink, 0.001));
+        expect(l.frameRect.left, greaterThan(0.0));
+        // Inner board follows the frame inset.
+        expect(l.innerRect.left, closeTo(l.leftShrink + SorobanLayout.frameBorder, 0.001));
+      });
+
+      test('the pitch is scaled by exactly the left scale', () {
+        final reference = (phoneSize.width - 2 * SorobanLayout.frameBorder) / rods;
+        expect(l.rodSpacing, closeTo(reference * left, 0.0001));
+      });
+
+      test('it is a true mirror of the right gutter', () {
+        final mirrored = SorobanLayout(
+          size: phoneSize,
+          totalRods: rods,
+          spacingScaleLeft: 1.0,
+          spacingScaleRight: left,
+        );
+        // Same width, same pitch; only the anchored side differs.
+        expect(l.frameRect.width, closeTo(mirrored.frameRect.width, 0.001));
+        expect(l.rodSpacing, closeTo(mirrored.rodSpacing, 0.0001));
+        expect(l.frameRect.right, equals(phoneSize.width));
+        expect(mirrored.frameRect.left, equals(0.0));
+      });
+    });
+
+    group('both gutters active at once', () {
+      final l = build(left: 0.95, right: 0.95);
+
+      test('both edges are pulled in by their own gutter', () {
+        expect(l.leftShrink, greaterThan(0.0));
+        expect(l.rightShrink, greaterThan(0.0));
+        expect(l.frameRect.left, closeTo(l.leftShrink, 0.001));
+        expect(l.frameRect.right, closeTo(phoneSize.width - l.rightShrink, 0.001));
+      });
+
+      test('the two gutters are symmetric and additive', () {
+        expect(l.leftShrink, closeTo(l.rightShrink, 0.0001));
+
+        final reference = (phoneSize.width - 2 * SorobanLayout.frameBorder) / rods;
+        final shrink = 0.05 * (phoneSize.width - 2 * SorobanLayout.frameBorder);
+        expect(l.leftShrink, closeTo(shrink, 0.0001));
+        // 5% from each side, so the pitch drops by 10%.
+        expect(l.rodSpacing, closeTo(reference * 0.90, 0.0001));
+      });
+    });
+
+    group('hard constraints hold in every gutter mode', () {
+      final modes = <String, ({double? left, double? right})>{
+        'none': (left: 1.0, right: 1.0),
+        'right only': (left: 1.0, right: 0.95),
+        'left only': (left: 0.95, right: 1.0),
+        'both': (left: 0.95, right: 0.95),
+      };
+
+      modes.forEach((label, mode) {
+        test('[$label] bead size is untouched', () {
+          final l = build(left: mode.left, right: mode.right);
+          expect(l.beadWidth, closeTo(referenceBeadWidth(phoneSize, rods), 0.0001));
+        });
+
+        test('[$label] frame height and every vertical metric are untouched', () {
+          final plain = build(left: 1.0, right: 1.0);
+          final l = build(left: mode.left, right: mode.right);
+
+          expect(l.frameRect.height, equals(phoneSize.height));
+          expect(l.innerRect.height, closeTo(plain.innerRect.height, 0.0001));
+          expect(l.innerRect.top, equals(SorobanLayout.frameBorder));
+          expect(l.beamTop, closeTo(plain.beamTop, 0.0001));
+          expect(l.beamBottom, closeTo(plain.beamBottom, 0.0001));
+          expect(l.beadHeight, closeTo(plain.beadHeight, 0.0001));
+          expect(l.beadPitch, closeTo(plain.beadPitch, 0.0001));
+          expect(l.travelDistance, closeTo(plain.travelDistance, 0.0001));
+          expect(verticalTotal(l), closeTo(verticalTotal(plain), 0.001));
+          expect(l.computeHeavenY(true), closeTo(plain.computeHeavenY(true), 0.0001));
+          for (int count = 0; count <= 4; count++) {
+            for (int b = 0; b < 4; b++) {
+              expect(
+                l.computeEarthY(b, count),
+                closeTo(plain.computeEarthY(b, count), 0.0001),
+              );
+            }
+          }
+        });
+
+        test('[$label] rod count, bead count and rod X positions are consistent', () {
+          final l = build(left: mode.left, right: mode.right);
+
+          // Exactly one rod per column, evenly spaced, all inside the frame.
+          for (int i = 0; i < rods; i++) {
+            final x = l.rodCenterX(i);
+            expect(x, greaterThan(l.frameRect.left));
+            expect(x, lessThan(l.frameRect.right));
+            final hit = l.hitTest(Offset(x, l.computeHeavenY(false) + 1.0));
+            expect(hit, isNotNull);
+            expect(hit!.rodIndex, equals(i));
+          }
+
+          // Rod pitch is exactly frame width / rod count, gutters included.
+          final inner = l.innerRect.width;
+          expect(l.rodSpacing, closeTo(inner / rods, 0.0001));
+
+          // The rightmost rod sits a half pitch from the right frame edge.
+          expect(
+            l.rodCenterX(0),
+            closeTo(l.innerRect.right - l.rodSpacing / 2, 0.0001),
+          );
+        });
+
+        test('[$label] the freed strips are outside the frame and map to no rod', () {
+          final l = build(left: mode.left, right: mode.right);
+          const y = 40.0;
+
+          if (l.leftShrink > 0) {
+            expect(l.hitTest(Offset(l.frameRect.left / 2, y)), isNull);
+          }
+          if (l.rightShrink > 0) {
+            expect(
+              l.hitTest(Offset((l.innerRect.right + l.frameRect.right) / 2, y)),
+              isNull,
+            );
+          }
+        });
+      });
+    });
+
+    group('pitch floor', () {
+      test('both gutters together cannot push the pitch below minPitchRatio', () {
+        // 0.90 + 0.90 would mean a 20% total shrink, i.e. a 0.80 pitch.
+        final l = build(left: 0.90, right: 0.90);
+        final reference = (phoneSize.width - 2 * SorobanLayout.frameBorder) / rods;
+
+        expect(l.rodSpacing / reference, closeTo(SorobanLayout.minPitchRatio, 0.0001));
+        // Beads still fit side by side, they never overlap. The floor puts the
+        // pitch exactly at the bead width, so compare with a tolerance.
+        expect(l.rodSpacing, closeTo(l.beadWidth, 0.0001));
+      });
+
+      test('the clamp keeps the requested left/right balance', () {
+        final l = build(left: 0.95, right: 0.85);
+        // 5% left vs 15% right requested; the ratio must survive the clamp.
+        expect(l.leftShrink / l.rightShrink, closeTo(5.0 / 15.0, 0.001));
+      });
+
+      test('an out-of-range scale is clamped instead of collapsing the pitch', () {
+        final l = build(left: -5.0, right: -5.0);
+        expect(l.rodSpacing, greaterThan(0.0));
+        expect(l.frameRect.width, greaterThan(0.0));
+      });
+    });
+  });
 }

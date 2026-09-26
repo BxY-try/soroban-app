@@ -16,6 +16,36 @@ class SorobanLayout {
   /// aesthetically balanced, and comfortably spaced.
   static const double beadScale = 0.90;
 
+  // ── Horizontal gutters ─────────────────────────────────────────────
+  // Two INDEPENDENT knobs, one per side. Each one insets the frame from its own
+  // side only, and the opposite edge stays pinned exactly where it is today:
+  //
+  //   rodSpacingScaleRight < 1  ->  left edge stays at 0,  right edge moves left
+  //   rodSpacingScaleLeft  < 1  ->  right edge stays at w, left edge moves right
+  //   both < 1                  ->  narrows from both sides at once
+  //   both == 1                 ->  the original layout, frame fills the box
+  //
+  // The inset of a side is `(1 - value) * innerWidth` px, and the pixels it
+  // frees become empty space on that side.
+  //
+  // Bead size is deliberately NOT affected by either value: [beadWidth] is
+  // derived from the un-shrunk reference inner width, so the beads keep the
+  // exact same size and only their X positions shift.
+
+  /// Shrink applied from the RIGHT side. 1.0 = right edge stays on the box edge.
+  static const double rodSpacingScaleRight = 0.97;
+
+  /// Shrink applied from the LEFT side. 1.0 = left edge stays on the box edge.
+  static const double rodSpacingScaleLeft = 0.99;
+
+  /// Hard floor for the rod pitch, as a fraction of the un-shrunk pitch.
+  ///
+  /// Bead width is frozen at 84% of that pitch, so shrinking the combined pitch
+  /// below this ratio would make neighbouring beads overlap sideways. If both
+  /// gutters together would break the floor, [guttersFor] scales them both down
+  /// proportionally instead of letting the beads collide.
+  static const double minPitchRatio = 0.84;
+
   final Size size;
   final int totalRods;
 
@@ -33,6 +63,7 @@ class SorobanLayout {
   /// 0.0 keeps the original behaviour: travel is purely proportional to bead size.
   final double travelBoost;
 
+  final Rect frameRect;
   final Rect innerRect;
   final double rodSpacing;
   final double upperDeckHeight;
@@ -43,6 +74,59 @@ class SorobanLayout {
   final double beadHeight;
   final double beadPitch;
   final double travelDistance;
+
+  /// Empty space freed on the LEFT of the frame, i.e. its left inset.
+  double get leftShrink => frameRect.left;
+
+  /// Empty space freed on the RIGHT of the frame, i.e. how much the right edge
+  /// was pulled in from the box edge.
+  double get rightShrink => size.width - frameRect.right;
+
+  /// Inner board width BEFORE any gutter is applied. This is the reference used
+  /// for the bead size, so the beads never resize when the gutters are tweaked.
+  static double _referenceInnerWidth(double sizeWidth) {
+    return math.max(0.0, sizeWidth - frameBorder * 2);
+  }
+
+  /// Pixels removed from EACH side of the frame for a widget box [sizeWidth] px
+  /// wide, honouring the pitch floor.
+  ///
+  /// [scaleLeft] / [scaleRight] default to [rodSpacingScaleLeft] /
+  /// [rodSpacingScaleRight]; they are injectable so callers (and tests) can
+  /// evaluate any combination without editing the configured constants.
+  static ({double left, double right}) guttersFor(
+    double sizeWidth, {
+    double? scaleLeft,
+    double? scaleRight,
+  }) {
+    final ref = _referenceInnerWidth(sizeWidth);
+    final ls = (scaleLeft ?? rodSpacingScaleLeft).clamp(0.05, 1.0).toDouble();
+    final rs = (scaleRight ?? rodSpacingScaleRight).clamp(0.05, 1.0).toDouble();
+
+    // Proportional correction keeping both gutters combined from pushing the rod
+    // pitch below [minPitchRatio]. Scaling both by the same factor preserves the
+    // left/right balance the caller asked for.
+    final total = (1.0 - ls) + (1.0 - rs);
+    final allowed = 1.0 - minPitchRatio;
+    final factor = total <= allowed ? 1.0 : allowed / total;
+
+    return (
+      left: ref * (1.0 - ls) * factor,
+      right: ref * (1.0 - rs) * factor,
+    );
+  }
+
+  /// Pixels removed from the LEFT edge of the frame, using the configured
+  /// [rodSpacingScaleLeft]. The RIGHT edge is unaffected by that value.
+  static double leftShrinkFor(double sizeWidth) {
+    return guttersFor(sizeWidth).left;
+  }
+
+  /// Pixels removed from the RIGHT edge of the frame, using the configured
+  /// [rodSpacingScaleRight]. The LEFT edge is unaffected by that value.
+  static double rightShrinkFor(double sizeWidth) {
+    return guttersFor(sizeWidth).right;
+  }
 
   static double _computeAvailableDeckHeight(double sizeHeight) {
     return math.max(
@@ -66,24 +150,57 @@ class SorobanLayout {
         travelBoost;
   }
 
+  /// Outer wooden frame for a widget box [size] px wide, inset by the gutters.
+  ///
+  /// The left offset and the width both come from the same gutter pair, so the
+  /// right edge stays pinned at [Size].width unless [rodSpacingScaleRight] is
+  /// below 1, and the left edge stays pinned at 0 unless [rodSpacingScaleLeft]
+  /// is below 1.
+  static Rect _frameRectFor(Size size, double? scaleLeft, double? scaleRight) {
+    final g = guttersFor(size.width, scaleLeft: scaleLeft, scaleRight: scaleRight);
+    return Rect.fromLTWH(
+      g.left,
+      0.0,
+      math.max(0.0, size.width - g.left - g.right),
+      math.max(0.0, size.height),
+    );
+  }
+
+  /// Width of the inner board, i.e. the reference width minus both gutters.
+  static double _innerBoardWidth(Size size, double? scaleLeft, double? scaleRight) {
+    final g = guttersFor(size.width, scaleLeft: scaleLeft, scaleRight: scaleRight);
+    return math.max(0.0, _referenceInnerWidth(size.width) - g.left - g.right);
+  }
+
+  /// Inner board, inset by the frame border on top of the gutters.
+  static Rect _innerRectFor(Size size, double? scaleLeft, double? scaleRight) {
+    final g = guttersFor(size.width, scaleLeft: scaleLeft, scaleRight: scaleRight);
+    return Rect.fromLTWH(
+      g.left + frameBorder,
+      frameBorder,
+      _innerBoardWidth(size, scaleLeft, scaleRight),
+      math.max(0.0, size.height - frameBorder * 2),
+    );
+  }
+
   SorobanLayout({
     required this.size,
     required this.totalRods,
     this.travelBoost = 0.0,
-  })  : innerRect = Rect.fromLTWH(
-          frameBorder,
-          frameBorder,
-          math.max(0.0, size.width - frameBorder * 2),
-          math.max(0.0, size.height - frameBorder * 2),
-        ),
+    double? spacingScaleLeft,
+    double? spacingScaleRight,
+  })  : frameRect = _frameRectFor(size, spacingScaleLeft, spacingScaleRight),
+        innerRect = _innerRectFor(size, spacingScaleLeft, spacingScaleRight),
         rodSpacing = totalRods > 0
-            ? math.max(0.0, size.width - frameBorder * 2) / totalRods
+            ? _innerBoardWidth(size, spacingScaleLeft, spacingScaleRight) / totalRods
             : 0.0,
         beadHeight = _computeBeadHeight(size.height, travelBoost),
         travelDistance = _computeTravelDistance(size.height, travelBoost),
         beadPitch = _computeBeadHeight(size.height, travelBoost) + beadGap,
+        // Bead width is intentionally measured against the UN-scaled reference
+        // width: tightening the rod spacing must never resize the beads.
         beadWidth = ((totalRods > 0
-                    ? math.max(0.0, size.width - frameBorder * 2) / totalRods
+                    ? _referenceInnerWidth(size.width) / totalRods
                     : 0.0) *
                 0.84)
             .clamp(18.0, 125.0),

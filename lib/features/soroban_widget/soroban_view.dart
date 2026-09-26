@@ -183,53 +183,67 @@ class _SorobanViewState extends State<SorobanView>
   Widget _buildDigitalReadout(SorobanController controller) {
     final totalRods = controller.state.rods.length;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: SorobanLayout.frameBorder),
-      child: Row(
-        children: List.generate(totalRods, (col) {
-          final rodIndex = totalRods - 1 - col;
-          final rodValue = controller.state.rods[rodIndex].value;
-          final hasValue = rodValue > 0;
+    // The readout Row is laid out on its own so it can use the same available
+    // width the abacus got. Padding both sides by the matching frame gutter
+    // keeps every badge centred exactly under its rod, whichever side the
+    // frame was shrunk from.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: SorobanLayout.frameBorder +
+                SorobanLayout.leftShrinkFor(constraints.maxWidth),
+            right: SorobanLayout.frameBorder +
+                SorobanLayout.rightShrinkFor(constraints.maxWidth),
+          ),
+          child: Row(
+            children: List.generate(totalRods, (col) {
+              final rodIndex = totalRods - 1 - col;
+              final rodValue = controller.state.rods[rodIndex].value;
+              final hasValue = rodValue > 0;
 
-          return Expanded(
-            child: Center(
-              child: Container(
-                constraints: const BoxConstraints(
-                  minWidth: 28,
-                  maxWidth: 36,
-                  minHeight: 26,
-                  maxHeight: 28,
-                ),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: hasValue
-                      ? SorobanTheme.frameColor.withValues(alpha: 0.10)
-                      : SorobanTheme.frameColor.withValues(alpha: 0.04),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(
-                    color: hasValue
-                        ? SorobanTheme.frameColor.withValues(alpha: 0.28)
-                        : SorobanTheme.frameColor.withValues(alpha: 0.12),
-                    width: 1.0,
+              return Expanded(
+                child: Center(
+                  child: Container(
+                    constraints: const BoxConstraints(
+                      minWidth: 28,
+                      maxWidth: 36,
+                      minHeight: 26,
+                      maxHeight: 28,
+                    ),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: hasValue
+                          ? SorobanTheme.frameColor.withValues(alpha: 0.10)
+                          : SorobanTheme.frameColor.withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: hasValue
+                            ? SorobanTheme.frameColor.withValues(alpha: 0.28)
+                            : SorobanTheme.frameColor.withValues(alpha: 0.12),
+                        width: 1.0,
+                      ),
+                    ),
+                    child: Text(
+                      '$rodValue',
+                      style: TextStyle(
+                        fontFamily: 'Courier',
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                        fontSize: 16,
+                        fontWeight:
+                            hasValue ? FontWeight.bold : FontWeight.w500,
+                        color: hasValue
+                            ? SorobanTheme.textDark
+                            : SorobanTheme.textMuted,
+                      ),
+                    ),
                   ),
                 ),
-                child: Text(
-                  '$rodValue',
-                  style: TextStyle(
-                    fontFamily: 'Courier',
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                    fontSize: 16,
-                    fontWeight: hasValue ? FontWeight.bold : FontWeight.w500,
-                    color: hasValue
-                        ? SorobanTheme.textDark
-                        : SorobanTheme.textMuted,
-                  ),
-                ),
-              ),
-            ),
-          );
-        }),
-      ),
+              );
+            }),
+          ),
+        );
+      },
     );
   }
 
