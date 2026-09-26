@@ -21,7 +21,11 @@ class ChallengeScreen extends StatefulWidget {
 class _ChallengeScreenState extends State<ChallengeScreen> {
   /// Scale factor for the main interactive challenge area (left controls + Soroban)
   /// to provide gentle breathing room towards the center without shrinking excessively.
-  static const double groupScale = 0.965;
+  static const double groupScale = 0.98;
+
+  /// Scale factor for the Soroban itself inside the main area, so the abacus
+  /// reads slightly larger than the surrounding chrome while keeping safe margins.
+  static const double sorobanScale = 0.992;
 
   @override
   Widget build(BuildContext context) {
@@ -69,11 +73,11 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
                           // Central Soroban View (Centered to align exactly with problem equation)
                           const Expanded(
                             child: Padding(
-                              padding: EdgeInsets.only(bottom: 4.0),
+                              padding: EdgeInsets.only(bottom: 2.0),
                               child: Center(
                                 child: FractionallySizedBox(
-                                  widthFactor: 0.95,
-                                  heightFactor: 0.95,
+                                  widthFactor: sorobanScale,
+                                  heightFactor: sorobanScale,
                                   child: AspectRatio(
                                     aspectRatio: 2.05,
                                     child: SorobanView(),
