@@ -1,21 +1,29 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/models/soroban_state.dart';
 import '../../core/state/soroban_controller.dart';
 import '../../shared/theme.dart';
+import 'bead_drag_state.dart';
 import 'soroban_layout.dart';
 import 'soroban_painter.dart';
 
 /// Interactive Soroban widget that displays the procedural abacus
 /// and translates touch/pointer gestures into natural bead motions.
 ///
-/// Supports two gesture modes that resolve automatically via Flutter's
-/// gesture arena:
+/// Every finger is tracked independently through its own pointer id, so
+/// several rods can be manipulated at the same time (multi-touch). Each
+/// pointer picks the rod it touched on pointer-down and keeps it until it
+/// lifts; a rod that is already held ignores further fingers instead of
+/// letting two of them fight over the same beads.
+///
+/// Pointer gestures resolve into one of two modes, mirroring the arena rules
+/// the old single-pointer recognisers used:
 /// - **Quick tap** (pointer up before drag slop): toggles targeted bead.
 ///   Opt-in via `SorobanController.tapToToggleEnabled` (off by default), so
-///   this mode is simply not registered when the user keeps beads drag-only.
+///   this mode is simply not honoured when the user keeps beads drag-only.
 /// - **Sustained drag** (pointer moves beyond slop): beads follow the
-///   cursor/finger in real-time with 1D rigid body push physics, committing on release.
+///   finger in real-time with 1D rigid body push physics, committing on release.
 class SorobanView extends StatefulWidget {
   final bool showDigitalReadout;
 
@@ -37,6 +45,10 @@ class SorobanView extends StatefulWidget {
 
 class _SorobanViewState extends State<SorobanView>
     with SingleTickerProviderStateMixin {
+  /// Longest press that still counts as a tap. Mirrors the old arena deadline:
+  /// a held-down finger lifts without toggling, it just does nothing.
+  static const Duration _tapWindow = Duration(milliseconds: 400);
+
   late AnimationController _animController;
   late Animation<double> _curvedAnim;
 
@@ -46,20 +58,10 @@ class _SorobanViewState extends State<SorobanView>
   /// Target soroban state (what we're animating towards).
   SorobanState? _targetState;
 
-  // ── Drag state ──────────────────────────────────────────────
-  int? _dragRodIndex;
-  bool _isDraggingEarth = false;
-  bool _isDraggingHeaven = false;
-  double _dragStartY = 0;
-
-  // Earth drag state (per-bead floating positions)
-  int? _grabbedEarthIndex;
-  List<double>? _dragStartEarthY;
-  List<double>? _currentEarthY;
-
-  // Heaven drag state (floating Y position)
-  bool _dragStartHeavenActive = false;
-  double? _currentHeavenY;
+  // ── Multi-touch drag state ─────────────────────────────────
+  /// Live pointer sessions keyed by pointer id. Empty when nobody touches the
+  /// abacus, which is the common case and costs nothing to keep.
+  final Map<int, _BeadPointerSession> _sessions = {};
 
   // Layout cache (updated every build via LayoutBuilder)
   Size _lastSize = Size.zero;
@@ -119,6 +121,34 @@ class _SorobanViewState extends State<SorobanView>
     );
   }
 
+  /// Per-rod floating positions of every rod a finger is currently dragging.
+  ///
+  /// Pointer-down only claims a rod; the session contributes to this map once
+  /// it has travelled past the slop, which is the same moment the beads used to
+  /// detach from the frame.
+  Map<int, BeadDragState> _dragStates() {
+    if (_sessions.isEmpty) return const {};
+
+    Map<int, BeadDragState>? states;
+    for (final session in _sessions.values) {
+      if (!session.dragging) continue;
+      states ??= <int, BeadDragState>{};
+      states[session.rodIndex] = BeadDragState(
+        earthY: session.currentEarthY,
+        heavenY: session.currentHeavenY,
+      );
+    }
+    return states ?? const {};
+  }
+
+  /// Drops every live session without committing, e.g. because the controller
+  /// took the abacus over for a hint animation.
+  void _clearSessions() {
+    if (_sessions.isEmpty) return;
+    _sessions.clear();
+    setState(() {});
+  }
+
   // ── Build ───────────────────────────────────────────────────
 
   @override
@@ -149,20 +179,16 @@ class _SorobanViewState extends State<SorobanView>
       builder: (context, constraints) {
         _lastSize = constraints.biggest;
 
-        return GestureDetector(
-          // Quick tap: fires when pointer lifts before exceeding drag slop.
-          // Opt-in only (default OFF): beads are drag-only unless the user
-          // enables "Klik Manik" in Settings.
-          onTapUp: controller.tapToToggleEnabled
-              ? (details) => _handleTap(details.localPosition, controller)
-              : null,
-          // Sustained drag: fires when pointer moves beyond drag slop
-          onVerticalDragStart: (details) =>
-              _onDragStart(details, controller),
-          onVerticalDragUpdate: (details) =>
-              _onDragUpdate(details, controller),
-          onVerticalDragEnd: (details) =>
-              _onDragEnd(details, controller),
+        return Listener(
+          // Multi-touch: raw pointer events instead of an arena-based
+          // recogniser, because a VerticalDragGestureRecognizer only ever
+          // reports the first pointer it wins. One finger per rod, many rods
+          // at once, resolved in _handlePointerDown/Move/Up.
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: (event) => _handlePointerDown(event, controller),
+          onPointerMove: (event) => _handlePointerMove(event, controller),
+          onPointerUp: (event) => _handlePointerUp(event, controller),
+          onPointerCancel: _handlePointerCancel,
           child: CustomPaint(
             size: Size(constraints.maxWidth, constraints.maxHeight),
             painter: SorobanPainter(
@@ -175,9 +201,7 @@ class _SorobanViewState extends State<SorobanView>
               previousState: _previousState,
               animationProgress: _curvedAnim.value,
               // Drag floating data
-              dragRodIndex: _dragRodIndex,
-              dragEarthY: _isDraggingEarth ? _currentEarthY : null,
-              dragHeavenY: _isDraggingHeaven ? _currentHeavenY : null,
+              dragStates: _dragStates(),
             ),
           ),
         );
@@ -252,9 +276,164 @@ class _SorobanViewState extends State<SorobanView>
     );
   }
 
+  // ── Pointer Handlers (one per finger) ──────────────────────
+
+  /// Claims the rod under [event] for that finger alone.
+  ///
+  /// Landing on the beam, on the frame, or on a rod another finger already
+  /// holds does nothing: the session is simply never created, so its later
+  /// move/up events fall through untouched.
+  void _handlePointerDown(
+    PointerDownEvent event,
+    SorobanController controller,
+  ) {
+    if (controller.isAnimating) return;
+
+    final layout = _getLayout(controller.state.rods.length);
+    final hit = layout.hitTest(event.localPosition);
+    if (hit == null) return;
+    if (_isRodHeld(hit.rodIndex)) return;
+
+    final rod = controller.state.rods[hit.rodIndex];
+    final isEarth = hit.deck == 'earth';
+    final currentEarth = rod.earth;
+
+    _sessions[event.pointer] = _BeadPointerSession(
+      rodIndex: hit.rodIndex,
+      isEarthDeck: isEarth,
+      downPosition: event.localPosition,
+      downTime: event.timeStamp,
+      startHeavenActive: rod.heaven,
+      startEarthIndex: isEarth
+          ? layout.earthBeadIndexAt(currentEarth, event.localPosition.dy)
+          : 0,
+      startEarthY: isEarth
+          ? List<double>.generate(
+              4,
+              (b) => layout.computeEarthY(b, currentEarth),
+            )
+          : const [],
+    );
+  }
+
+  /// Moves the beads of the rod this finger grabbed, once it has travelled far
+  /// enough to be a drag rather than a tap.
+  void _handlePointerMove(
+    PointerMoveEvent event,
+    SorobanController controller,
+  ) {
+    final session = _sessions[event.pointer];
+    if (session == null) return;
+
+    // A hint/replay animation grabbed the abacus: drop the finger's session
+    // rather than fighting it for the same beads.
+    if (controller.isAnimating) {
+      _clearSessions();
+      return;
+    }
+
+    final layout = _getLayout(controller.state.rods.length);
+
+    if (!session.dragging) {
+      final travelled = event.localPosition - session.downPosition;
+      // Same gate the vertical drag recogniser used: past touch slop, and
+      // vertical, so a sideways swipe across the frame is not a bead move.
+      if (travelled.distance < kTouchSlop) return;
+      if (travelled.dy.abs() < travelled.dx.abs()) return;
+      session.dragging = true;
+    }
+
+    final deltaY = event.localPosition.dy - session.downPosition.dy;
+    if (session.isEarthDeck) {
+      session.currentEarthY = layout.computeEarthDragPositions(
+        grabbedIndex: session.startEarthIndex,
+        initialEarthY: session.startEarthY,
+        deltaY: deltaY,
+      );
+    } else {
+      session.currentHeavenY = layout.computeHeavenDragY(
+        session.startHeavenActive,
+        deltaY,
+      );
+    }
+
+    setState(() {});
+  }
+
+  /// Commits this finger's rod: the drag lands where it was released, and a
+  /// short press is the optional tap-to-toggle shortcut. Rods held by other
+  /// fingers are untouched, so they keep floating until their own finger lifts.
+  void _handlePointerUp(
+    PointerUpEvent event,
+    SorobanController controller,
+  ) {
+    final session = _sessions.remove(event.pointer);
+    if (session == null) return;
+
+    if (controller.isAnimating) {
+      setState(() {});
+      return;
+    }
+
+    if (session.dragging) {
+      _commitDrag(session, controller);
+    } else if (controller.tapToToggleEnabled &&
+        event.timeStamp - session.downTime <= _tapWindow) {
+      _handleTap(session, event.localPosition, controller);
+    }
+
+    setState(() {});
+  }
+
+  /// The gesture was taken away (e.g. the platform claimed it), so the beads
+  /// snap back without committing.
+  void _handlePointerCancel(PointerCancelEvent event) {
+    if (_sessions.remove(event.pointer) == null) return;
+    setState(() {});
+  }
+
+  bool _isRodHeld(int rodIndex) {
+    for (final session in _sessions.values) {
+      if (session.rodIndex == rodIndex) return true;
+    }
+    return false;
+  }
+
+  void _commitDrag(
+    _BeadPointerSession session,
+    SorobanController controller,
+  ) {
+    final layout = _getLayout(controller.state.rods.length);
+    final rodIndex = session.rodIndex;
+
+    if (session.isEarthDeck && session.currentEarthY != null) {
+      final targetCount =
+          layout.resolveEarthActiveCount(session.currentEarthY!);
+      final currentEarth = controller.state.rods[rodIndex].earth;
+      if (targetCount == currentEarth) return;
+      controller.tapEarthBead(rodIndex, targetCount);
+    } else if (!session.isEarthDeck && session.currentHeavenY != null) {
+      final targetActive = layout.resolveHeavenActive(session.currentHeavenY!);
+      if (targetActive == session.startHeavenActive) return;
+      controller.tapHeavenBead(rodIndex);
+    } else {
+      return;
+    }
+
+    // The finger already showed the beads in their final resting place, so the
+    // slide animation is skipped — exactly what the old drag handler did, only
+    // now per finger instead of once for the whole abacus.
+    _previousState = controller.state;
+    _targetState = controller.state;
+  }
+
   // ── Quick Tap Handler ───────────────────────────────────────
 
-  void _handleTap(Offset localPos, SorobanController controller) {
+  void _handleTap(
+    _BeadPointerSession session,
+    Offset localPos,
+    SorobanController controller,
+  ) {
     if (controller.isAnimating) return;
 
     final layout = _getLayout(controller.state.rods.length);
@@ -278,108 +457,52 @@ class _SorobanViewState extends State<SorobanView>
       }
     }
   }
-
-  // ── Drag Handlers ──────────────────────────────────────────
-
-  void _onDragStart(
-    DragStartDetails details,
-    SorobanController controller,
-  ) {
-    if (controller.isAnimating) return;
-
-    final layout = _getLayout(controller.state.rods.length);
-    final hit = layout.hitTest(details.localPosition);
-    if (hit == null) return;
-
-    _dragRodIndex = hit.rodIndex;
-    _dragStartY = details.localPosition.dy;
-
-    if (hit.deck == 'heaven') {
-      _isDraggingHeaven = true;
-      _isDraggingEarth = false;
-      _dragStartHeavenActive =
-          controller.state.rods[hit.rodIndex].heaven;
-      _currentHeavenY = layout.computeHeavenY(_dragStartHeavenActive);
-    } else {
-      _isDraggingEarth = true;
-      _isDraggingHeaven = false;
-      final currentEarth = controller.state.rods[hit.rodIndex].earth;
-      _grabbedEarthIndex = layout.earthBeadIndexAt(
-        currentEarth,
-        details.localPosition.dy,
-      );
-      _dragStartEarthY = List<double>.generate(
-        4,
-        (b) => layout.computeEarthY(b, currentEarth),
-      );
-      _currentEarthY = List<double>.from(_dragStartEarthY!);
-    }
-
-    setState(() {});
-  }
-
-  void _onDragUpdate(
-    DragUpdateDetails details,
-    SorobanController controller,
-  ) {
-    if (_dragRodIndex == null) return;
-
-    final layout = _getLayout(controller.state.rods.length);
-    final deltaY = details.localPosition.dy - _dragStartY;
-
-    if (_isDraggingEarth &&
-        _grabbedEarthIndex != null &&
-        _dragStartEarthY != null) {
-      _currentEarthY = layout.computeEarthDragPositions(
-        grabbedIndex: _grabbedEarthIndex!,
-        initialEarthY: _dragStartEarthY!,
-        deltaY: deltaY,
-      );
-      setState(() {});
-    } else if (_isDraggingHeaven) {
-      _currentHeavenY = layout.computeHeavenDragY(
-        _dragStartHeavenActive,
-        deltaY,
-      );
-      setState(() {});
-    }
-  }
-
-  void _onDragEnd(
-    DragEndDetails details,
-    SorobanController controller,
-  ) {
-    if (_dragRodIndex == null) return;
-    final rodIndex = _dragRodIndex!;
-    final layout = _getLayout(controller.state.rods.length);
-
-    if (_isDraggingEarth && _currentEarthY != null) {
-      final targetCount =
-          layout.resolveEarthActiveCount(_currentEarthY!);
-      final currentEarth = controller.state.rods[rodIndex].earth;
-      if (targetCount != currentEarth) {
-        controller.tapEarthBead(rodIndex, targetCount);
-        _previousState = controller.state;
-        _targetState = controller.state;
-      }
-    } else if (_isDraggingHeaven && _currentHeavenY != null) {
-      final targetActive =
-          layout.resolveHeavenActive(_currentHeavenY!);
-      if (targetActive != _dragStartHeavenActive) {
-        controller.tapHeavenBead(rodIndex);
-        _previousState = controller.state;
-        _targetState = controller.state;
-      }
-    }
-
-    // Reset drag state
-    _dragRodIndex = null;
-    _isDraggingEarth = false;
-    _isDraggingHeaven = false;
-    _grabbedEarthIndex = null;
-    _dragStartEarthY = null;
-    _currentEarthY = null;
-    _currentHeavenY = null;
-    setState(() {});
-  }
 }
+
+/// One finger's claim on one rod, from pointer-down to pointer-up.
+///
+/// Immutable geometry (which rod, which deck, where the finger landed, the rest
+/// positions captured at grab time) plus the mutable floating positions the
+/// painter renders while the drag is in flight.
+class _BeadPointerSession {
+  /// Rod this finger owns for the whole gesture.
+  final int rodIndex;
+
+  /// Whether the finger grabbed the lower (earth) deck or the upper one.
+  final bool isEarthDeck;
+
+  /// Pointer-down position in the abacus' local coordinates.
+  final Offset downPosition;
+
+  /// Pointer-down timestamp, used to tell a tap from a press-and-hold.
+  final Duration downTime;
+
+  /// Heaven bead state when the finger landed, i.e. what a release that moves
+  /// nothing should leave alone.
+  final bool startHeavenActive;
+
+  /// Earth bead (0..3) under the finger at grab time.
+  final int startEarthIndex;
+
+  /// Resting Y positions of all 4 earth beads at grab time, the baseline the
+  /// rigid-body push physics resolves against.
+  final List<double> startEarthY;
+
+  /// Set once the finger travels past the slop, from then on this is a drag.
+  bool dragging = false;
+
+  /// Live floating positions, null until the drag starts.
+  List<double>? currentEarthY;
+  double? currentHeavenY;
+
+  _BeadPointerSession({
+    required this.rodIndex,
+    required this.isEarthDeck,
+    required this.downPosition,
+    required this.downTime,
+    required this.startHeavenActive,
+    required this.startEarthIndex,
+    required this.startEarthY,
+  });
+}
+

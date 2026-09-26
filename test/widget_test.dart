@@ -579,6 +579,204 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('SorobanView drags several rods at once with one finger each',
+      (tester) async {
+    tester.view.physicalSize = const Size(480, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    // No tap-to-toggle: both fingers below are pure drags.
+    SharedPreferences.setMockInitialValues({});
+    final controller = SorobanController();
+    addTearDown(() => controller.dispose());
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 320,
+                height: 600,
+                child: SorobanView(showDigitalReadout: false),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final canvas = find
+        .descendant(
+          of: find.byType(SorobanView),
+          matching: find.byType(CustomPaint),
+        )
+        .first;
+    final layout = SorobanLayout(size: tester.getSize(canvas), totalRods: 7);
+    final origin = tester.getTopLeft(canvas);
+
+    /// Global centre of a bead, from the very same layout the painter uses.
+    Offset beadCenter(int rodIndex,
+        {required bool heaven, required int index}) {
+      final y = heaven
+          ? layout.computeHeavenY(false)
+          : layout.computeEarthY(index, 0);
+      return origin +
+          Offset(layout.rodCenterX(rodIndex), y + layout.beadHeight / 2);
+    }
+
+    // Rod 0: lowest earth bead, dragged up against the beam (+1).
+    // Rod 6: heaven bead, dragged down against the beam (+5).
+    final earthFinger = await tester
+        .startGesture(beadCenter(0, heaven: false, index: 0));
+    final heavenFinger = await tester
+        .startGesture(beadCenter(6, heaven: true, index: 0));
+
+    await earthFinger.moveBy(const Offset(0, -70));
+    await heavenFinger.moveBy(const Offset(0, 70));
+    await tester.pump();
+
+    // Both beads float under their own finger, neither committed yet.
+    expect(controller.state.value, equals(0));
+
+    // Lifting the first finger commits only ITS rod; the other bead is still
+    // mid-air because its finger has not lifted yet.
+    await earthFinger.up();
+    await tester.pump();
+    expect(controller.state.rods[0].earth, equals(1));
+    expect(controller.state.rods[6].heaven, isFalse);
+
+    await heavenFinger.up();
+    await tester.pump();
+    expect(controller.state.rods[6].heaven, isTrue);
+    // Rod 0 is units (+1), rod 6 is the millions rod (+5.000.000).
+    expect(controller.state.value, equals(5000001));
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('SorobanView ignores a second finger on an already held rod',
+      (tester) async {
+    tester.view.physicalSize = const Size(480, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+    final controller = SorobanController();
+    addTearDown(() => controller.dispose());
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 320,
+                height: 600,
+                child: SorobanView(showDigitalReadout: false),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final canvas = find
+        .descendant(
+          of: find.byType(SorobanView),
+          matching: find.byType(CustomPaint),
+        )
+        .first;
+    final layout = SorobanLayout(size: tester.getSize(canvas), totalRods: 7);
+    final origin = tester.getTopLeft(canvas);
+    final rod0EarthBead = origin +
+        Offset(
+          layout.rodCenterX(0),
+          layout.computeEarthY(0, 0) + layout.beadHeight / 2,
+        );
+
+    final first = await tester.startGesture(rod0EarthBead);
+    final second = await tester.startGesture(rod0EarthBead);
+
+    await first.moveBy(const Offset(0, -70));
+    await second.moveBy(const Offset(0, -70));
+    await second.up();
+    await tester.pump();
+
+    // The second finger never owned the rod, so its release moves nothing.
+    expect(controller.state.rods[0].earth, equals(0));
+
+    await first.up();
+    await tester.pump();
+    expect(controller.state.rods[0].earth, equals(1));
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('SorobanView toggles two rods from two simultaneous taps',
+      (tester) async {
+    tester.view.physicalSize = const Size(480, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({'tap_to_toggle_enabled': true});
+    final controller = SorobanController();
+    addTearDown(() => controller.dispose());
+    await controller.init(initAudio: false);
+    expect(controller.tapToToggleEnabled, isTrue);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 320,
+                height: 600,
+                child: SorobanView(showDigitalReadout: false),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final canvas = find
+        .descendant(
+          of: find.byType(SorobanView),
+          matching: find.byType(CustomPaint),
+        )
+        .first;
+    final layout = SorobanLayout(size: tester.getSize(canvas), totalRods: 7);
+    final origin = tester.getTopLeft(canvas);
+
+    final earthFinger = await tester.startGesture(origin +
+        Offset(
+            layout.rodCenterX(0),
+            layout.computeEarthY(0, 0) + layout.beadHeight / 2));
+    final heavenFinger = await tester.startGesture(origin +
+        Offset(
+            layout.rodCenterX(6),
+            layout.computeHeavenY(false) + layout.beadHeight / 2));
+
+    await earthFinger.up();
+    await heavenFinger.up();
+    await tester.pumpAndSettle();
+
+    expect(controller.state.rods[0].earth, equals(1));
+    expect(controller.state.rods[6].heaven, isTrue);
+    // Rod 0 is units (+1), rod 6 is the millions rod (+5.000.000).
+    expect(controller.state.value, equals(5000001));
+
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('SettingsScreen exposes the "Klik Manik" toggle', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final controller = SorobanController();

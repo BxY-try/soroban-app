@@ -2,6 +2,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import '../../core/models/soroban_state.dart';
 import '../../shared/theme.dart';
+import 'bead_drag_state.dart';
 import 'soroban_layout.dart';
 
 /// Procedural CustomPainter that renders a 7-rod Japanese Soroban (sempoa)
@@ -23,14 +24,12 @@ class SorobanPainter extends CustomPainter {
   /// Animation progress 0.0 (at previousState) to 1.0 (at state). Values >= 1 mean no animation.
   final double animationProgress;
 
-  /// Rod index currently being dragged by the user (null when not dragging).
-  final int? dragRodIndex;
-
-  /// Exact floating Y positions of the 4 earth beads during drag.
-  final List<double>? dragEarthY;
-
-  /// Exact floating Y position of the heaven bead during drag.
-  final double? dragHeavenY;
+  /// Rod index -> floating bead positions for every rod currently held down.
+  ///
+  /// Multi-touch: the map can hold several rods at once, so each finger drags
+  /// its own deck in real time. Rods missing from the map render from [state]
+  /// (or the slide animation) as usual.
+  final Map<int, BeadDragState> dragStates;
 
   /// Extra bead travel (px) granted to each deck, paid for by the bead budget
   /// so beads keep their size when the widget grows. See [SorobanLayout].
@@ -43,9 +42,7 @@ class SorobanPainter extends CustomPainter {
     required this.trailBeads,
     this.previousState,
     this.animationProgress = 1.0,
-    this.dragRodIndex,
-    this.dragEarthY,
-    this.dragHeavenY,
+    this.dragStates = const {},
     this.travelBoost = 0.0,
   });
 
@@ -155,15 +152,15 @@ class SorobanPainter extends CustomPainter {
           ? SorobanTheme.perRodColors[rodIndex % SorobanTheme.perRodColors.length]
           : SorobanTheme.beadDefaultColor;
 
-      // Is this the rod currently being dragged?
-      final isDragRod = rodIndex == dragRodIndex;
+      // Floating override for this rod, if a finger is currently holding it.
+      final drag = dragStates[rodIndex];
 
       // 1. Heaven Bead — drag-float or smooth slide
       double heavenY;
       bool heavenActive;
 
-      if (isDragRod && dragHeavenY != null) {
-        heavenY = dragHeavenY!;
+      if (drag?.heavenY != null) {
+        heavenY = drag!.heavenY!;
         heavenActive = layout.resolveHeavenActive(heavenY);
       } else {
         final targetHeavenY = layout.computeHeavenY(rod.heaven);
@@ -189,9 +186,10 @@ class SorobanPainter extends CustomPainter {
       );
 
       // 2. Earth Beads (4 beads) — drag-float or smooth slide
-      if (isDragRod && dragEarthY != null) {
+      final dragEarthY = drag?.earthY;
+      if (dragEarthY != null) {
         for (int b = 0; b < 4; b++) {
-          final beadY = dragEarthY![b];
+          final beadY = dragEarthY[b];
           final midY = (layout.computeEarthY(b, 4) + layout.computeEarthY(b, 0)) / 2.0;
           final isActive = beadY < midY;
 
