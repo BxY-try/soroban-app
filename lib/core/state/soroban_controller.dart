@@ -239,7 +239,7 @@ class SorobanController extends ChangeNotifier {
     );
 
     _recordTrail('rod_${rodIndex}_heaven');
-    SoundService().playClack();
+    _clackPending = true;
     notifyListeners();
   }
 
@@ -267,7 +267,7 @@ class SorobanController extends ChangeNotifier {
     );
 
     _recordTrail('rod_${rodIndex}_earth_$newCount');
-    SoundService().playClack();
+    _clackPending = true;
     notifyListeners();
   }
 
@@ -277,6 +277,23 @@ class SorobanController extends ChangeNotifier {
   // per-commit check. SorobanState.value encodes every rod, so a matching value
   // means the board is exactly the one that checkpoint describes — there is
   // nothing else to verify, and nothing to refuse.
+
+  /// Set by any commit, consumed once when the gesture ends.
+  bool _clackPending = false;
+
+  /// Ends a physical gesture: the last finger lifted.
+  ///
+  /// One gesture, one clack. Two fingers landing on two rods commit twice, and a
+  /// second clack on top of the first does not add anything you can hear — it
+  /// only overlaps on the one player and takes the pair down with it. So the bead
+  /// noise is reported once, here, at the same quiescence point the checkpoint
+  /// chain is read at, and never per commit.
+  void onGestureSettled() {
+    reconcileCheckpoints();
+    if (!_clackPending) return;
+    _clackPending = false;
+    SoundService().playClack();
+  }
 
   /// Reconciles the checkpoint chain against the current board.
   ///
@@ -426,6 +443,7 @@ class SorobanController extends ChangeNotifier {
 
     if (hintResult == null) return;
 
+    _clackPending = false;
     _isAnimating = true;
     notifyListeners();
 
@@ -471,6 +489,7 @@ class SorobanController extends ChangeNotifier {
 
     if (replayResult == null) return;
 
+    _clackPending = false;
     _isAnimating = true;
     // 1. Rollback to state before this digit
     _state = replayResult.fromState.clone();

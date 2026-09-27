@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:soroban_app/core/models/problem.dart';
+import 'package:soroban_app/core/services/sound_service.dart';
 import 'package:soroban_app/core/state/soroban_controller.dart';
 import 'package:soroban_app/features/challenge/challenge_screen.dart';
 import 'package:soroban_app/features/challenge/mode_select_screen.dart';
@@ -778,11 +779,13 @@ void main() {
     addTearDown(() => tester.view.resetPhysicalSize());
 
     SharedPreferences.setMockInitialValues({});
+    final sound = SoundService();
 
     // `4 + 5` on the units rod: the first digit wants 4, the second wants 5 on
     // top of it, and the quick way to reach 9 is heaven and earth in one sweep.
     final controller = controllerForSum([4, 5]);
     addTearDown(() => controller.dispose());
+    sound.clackRequestCount = 0;
 
     expect(
       controller.currentProblem!.checkpoints.map((c) => c.targetValue),
@@ -852,6 +855,11 @@ void main() {
       reason: 'one motion settled both digits',
     );
     expect(controller.checkpointSnapshotCount, equals(3));
+    expect(
+      sound.clackRequestCount,
+      equals(1),
+      reason: 'two fingers, one gesture, one sound',
+    );
 
     expect(tester.takeException(), isNull);
   });

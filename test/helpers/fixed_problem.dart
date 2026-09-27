@@ -154,7 +154,7 @@ void setRodValue(SorobanController controller, int rodIndex, int value) {
   if (rod.earth != earth) controller.tapEarthBead(rodIndex, earth);
 }
 
-/// Commits [moves] and then reconciles once, as one physical gesture would.
+/// Commits [moves] and then ends the gesture, as a physical one would.
 void performGesture(
   SorobanController controller,
   List<BeadMove> moves,
@@ -166,7 +166,7 @@ void performGesture(
       controller.tapEarthBead(move.rodIndex, move.to);
     }
   }
-  controller.reconcileCheckpoints();
+  controller.onGestureSettled();
 }
 
 /// Commits one whole checkpoint as a single gesture.

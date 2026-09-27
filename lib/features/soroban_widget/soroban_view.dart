@@ -412,7 +412,7 @@ class _SorobanViewState extends State<SorobanView>
     }
 
     if (_sessions.isEmpty) {
-      controller.reconcileCheckpoints();
+      controller.onGestureSettled();
     }
 
     setState(() {});

@@ -55,14 +55,26 @@ class SoundService {
     }
   }
 
+  /// Counts clack requests, whether or not a player was ready to make a noise.
+  ///
+  /// Exposed for tests: whether a speaker produced sound cannot be observed from
+  /// a unit test, but "one gesture asks for one clack" can, and that is the part
+  /// this service is responsible for.
+  @visibleForTesting
+  int clackRequestCount = 0;
+
   /// Plays the crisp stapler / bead clack audio effect with subtle dynamic variation.
   Future<void> playClack() async {
+    clackRequestCount++;
     if (!enabled || !_isInitialized || _player == null) return;
     try {
       final String assetPath = getNextSoundPath();
       // Subtle volume jitter between 0.80 and 0.88 for natural physical response
       final double volume = 0.80 + _random.nextDouble() * 0.08;
-      await _player!.stop();
+      // Deliberately no stop() before play(). On the low-latency player that
+      // opens a silent window, and a clack arriving right after another one —
+      // exactly what a two-finger gesture or a fast repeated move produces —
+      // lands inside that window and is swallowed.
       await _player!.play(
         AssetSource(assetPath),
         volume: volume,

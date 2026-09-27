@@ -1,10 +1,103 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:soroban_app/core/models/problem.dart';
+import 'package:soroban_app/core/services/sound_service.dart';
 import 'package:soroban_app/core/state/soroban_controller.dart';
 
 import '../helpers/fixed_problem.dart';
 void main() {
+  group('One clack per gesture', () {
+    // The player cannot be heard from a test, so these assert the part the
+    // controller owns: how many clacks a gesture asks for.
+    late SoundService sound;
+
+    setUp(() {
+      sound = SoundService();
+      sound.clackRequestCount = 0;
+    });
+
+    test('nothing is asked for while the finger is still down', () {
+      final controller = controllerForSum([4, 10]);
+      setRodValue(controller, 0, 4);
+
+      expect(
+        sound.clackRequestCount,
+        equals(0),
+        reason: 'a commit is not a gesture, so it is not a sound either',
+      );
+    });
+
+    test('a one-finger gesture asks for one clack', () {
+      final controller = controllerForSum([4, 10]);
+      setRodValue(controller, 0, 4);
+      controller.onGestureSettled();
+
+      expect(sound.clackRequestCount, equals(1));
+      expect(controller.activeCheckpointIndex, equals(1));
+    });
+
+    test('a two-finger gesture on two rods still asks for one clack', () {
+      final controller = controllerForSum([4, 10]);
+
+      // Two fingers, two rods, two commits — the multi-touch case.
+      setRodValue(controller, 0, 4);
+      setRodValue(controller, 1, 1);
+      controller.onGestureSettled();
+
+      expect(
+        sound.clackRequestCount,
+        equals(1),
+        reason: 'one motion, one sound: a second clack would overlap on the '
+            'same player and take the pair down',
+      );
+      expect(controller.state.value, equals(14));
+    });
+
+    test('a two-finger gesture on one rod, both decks, asks for one clack', () {
+      final controller = controllerForSum([4, 5]);
+
+      // Heaven and earth set together: the quick "9" motion.
+      controller.tapHeavenBead(0);
+      controller.tapEarthBead(0, 4);
+      controller.onGestureSettled();
+
+      expect(sound.clackRequestCount, equals(1));
+      expect(controller.state.rods[0].value, equals(9));
+    });
+
+    test('a gesture that moved nothing asks for nothing', () {
+      final controller = controllerForSum([4, 10]);
+      controller.onGestureSettled();
+
+      expect(sound.clackRequestCount, equals(0));
+    });
+
+    test('consecutive gestures ask for one clack each', () {
+      final controller = controllerForSum([4, 10]);
+
+      setRodValue(controller, 0, 4);
+      controller.onGestureSettled();
+      setRodValue(controller, 1, 1);
+      controller.onGestureSettled();
+
+      expect(sound.clackRequestCount, equals(2));
+      expect(controller.activeCheckpointIndex, equals(2));
+    });
+
+    test('a hint animation clacks per move, not per gesture', () async {
+      final controller = controllerForSum([4, 10]);
+      setRodValue(controller, 0, 4);
+      controller.onGestureSettled();
+      final afterGesture = sound.clackRequestCount;
+
+      // Each animated move is a separate visible beat with its own delay, so
+      // each one is its own sound. A stale pending clack from the interrupted
+      // gesture must not fire on top of them.
+      await controller.executeHint();
+      expect(sound.clackRequestCount, greaterThan(afterGesture));
+    });
+  });
+
   group('SorobanController Reset & Replay Tests', () {
     test('executeReset restores the board, then rolls back to previous checkpoint', () {
       final controller = controllerForSum([4, 10]);
