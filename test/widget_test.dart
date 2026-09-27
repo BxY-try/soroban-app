@@ -1,9 +1,14 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:soroban_app/core/engine/addition_engine.dart';
+import 'package:soroban_app/core/engine/problem_generator.dart';
 import 'package:soroban_app/core/models/bead_move.dart';
 import 'package:soroban_app/core/models/problem.dart';
+import 'package:soroban_app/core/models/soroban_state.dart';
 import 'package:soroban_app/core/state/soroban_controller.dart';
 import 'package:soroban_app/features/challenge/challenge_screen.dart';
 import 'package:soroban_app/features/challenge/mode_select_screen.dart';
@@ -14,6 +19,48 @@ import 'package:soroban_app/shared/theme.dart';
 import 'package:soroban_app/features/challenge/result_screen.dart';
 import 'package:soroban_app/features/settings/settings_screen.dart';
 import 'package:soroban_app/features/practice/practice_screen.dart';
+
+/// A generator that always yields the same terms, so a gesture can be aimed at a
+/// checkpoint whose rod and target value are known before the test runs.
+class _FixedTerms extends ProblemGenerator {
+  _FixedTerms(this.terms) : super(random: Random(0));
+
+  final List<int> terms;
+
+  @override
+  Problem generateProblem({
+    required ProblemCategory category,
+    required Difficulty difficulty,
+    int rodCount = 7,
+  }) {
+    final engine = const AdditionEngine();
+    var running = SorobanState.zero(rodCount: rodCount);
+    final checkpoints = <DigitCheckpoint>[];
+
+    for (var i = 0; i < terms.length; i++) {
+      final produced = engine.generateCheckpointsForTerm(
+        startingState: running,
+        termValue: terms[i],
+        isAddition: true,
+        termIndex: i,
+      );
+      checkpoints.addAll(produced);
+      running = SorobanState.fromValue(
+        produced.last.targetValue,
+        rodCount: rodCount,
+      );
+    }
+
+    return Problem(
+      category: category,
+      difficulty: difficulty,
+      terms: terms,
+      operators: List.filled(terms.length - 1, '+'),
+      expectedResult: running.value,
+      checkpoints: checkpoints,
+    );
+  }
+}
 
 void main() {
   testWidgets('ModeSelectScreen displays category choices and navigation', (tester) async {
@@ -372,9 +419,11 @@ void main() {
     // Initially activeCheckpointIndex is 0: no digit is faded
     expect(hasFadedSpan(tester), isFalse);
 
-    // Advance to checkpoint 0
+    // Advance to checkpoint 0, as one gesture: the controller only reconciles
+    // the checkpoint chain once the last finger lifts.
     final problem = controller.currentProblem!;
     final moves = problem.checkpoints[0].atomicMoves;
+    controller.beginGesture();
     for (final move in moves) {
       if (move.kind == BeadKind.heaven) {
         controller.tapHeavenBead(move.rodIndex);
@@ -382,6 +431,7 @@ void main() {
         controller.tapEarthBead(move.rodIndex, move.to);
       }
     }
+    controller.endGesture();
     await tester.pump();
 
     expect(controller.activeCheckpointIndex, equals(1));
@@ -774,6 +824,235 @@ void main() {
     // Rod 0 is units (+1), rod 6 is the millions rod (+5.000.000).
     expect(controller.state.value, equals(5000001));
 
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('two fingers on one rod set a 9 in a single motion', (tester) async {
+    tester.view.physicalSize = const Size(480, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+
+    /// `4 + 5` on the units rod: the first digit wants 4, the second wants 5 on
+    /// top of it, and the quick way to reach 9 is heaven and earth in one sweep.
+    final controller = SorobanController(generator: _FixedTerms([4, 5]));
+    addTearDown(() => controller.dispose());
+    controller.startPracticeProblem(ProblemCategory.addition, Difficulty.easy);
+
+    expect(
+      controller.currentProblem!.checkpoints.map((c) => c.targetValue),
+      [4, 9],
+    );
+    expect(controller.allowedRodsForNextTouch(), {0});
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 320,
+                height: 600,
+                child: SorobanView(showDigitalReadout: false),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final canvas = find
+        .descendant(
+          of: find.byType(SorobanView),
+          matching: find.byType(CustomPaint),
+        )
+        .first;
+    final layout = SorobanLayout(size: tester.getSize(canvas), totalRods: 7);
+    final origin = tester.getTopLeft(canvas);
+
+    final heaven = origin +
+        Offset(
+          layout.rodCenterX(0),
+          layout.computeHeavenY(false) + layout.beadHeight / 2,
+        );
+    // The lowest inactive earth bead: pushing the bottom of the stack up carries
+    // the whole group against the beam, which is how 4 is actually set.
+    final earth = origin +
+        Offset(
+          layout.rodCenterX(0),
+          layout.computeEarthY(3, 0) + layout.beadHeight / 2,
+        );
+
+    // One finger per deck, both dragged all the way, then released together.
+    final heavenFinger = await tester.startGesture(heaven);
+    final earthFinger = await tester.startGesture(earth);
+    await heavenFinger.moveBy(const Offset(0, 90));
+    await earthFinger.moveBy(const Offset(0, -90));
+    await tester.pump();
+
+    // Both beads float at once, before either finger is released.
+    expect(controller.state.rods[0].value, equals(0),
+        reason: 'nothing is committed while the fingers are still down');
+
+    await heavenFinger.up();
+    await earthFinger.up();
+    await tester.pump();
+
+    expect(controller.state.rods[0].value, equals(9));
+    expect(controller.state.value, equals(9));
+    expect(
+      controller.activeCheckpointIndex,
+      equals(2),
+      reason: 'one motion settled both digits',
+    );
+    expect(controller.checkpointSnapshotCount, equals(3));
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a finger on a rod the digit does not want yet is dropped',
+      (tester) async {
+    tester.view.physicalSize = const Size(480, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+
+    // `4 + 10`: the first digit wants rod 0 = 4, the second wants rod 1 = 1, so
+    // the set of open rods genuinely changes once the first digit is done.
+    final controller = SorobanController(generator: _FixedTerms([4, 10]));
+    addTearDown(() => controller.dispose());
+    controller.startPracticeProblem(ProblemCategory.addition, Difficulty.easy);
+
+    expect(
+      controller.currentProblem!.checkpoints.map((c) => c.targetValue),
+      [4, 14],
+    );
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 320,
+                height: 600,
+                child: SorobanView(showDigitalReadout: false),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final canvas = find
+        .descendant(
+          of: find.byType(SorobanView),
+          matching: find.byType(CustomPaint),
+        )
+        .first;
+    final layout = SorobanLayout(size: tester.getSize(canvas), totalRods: 7);
+    final origin = tester.getTopLeft(canvas);
+
+    Offset beadOn(int rodIndex, int earthIndex) => origin +
+        Offset(
+          layout.rodCenterX(rodIndex),
+          layout.computeEarthY(earthIndex, 0) + layout.beadHeight / 2,
+        );
+
+    // The first digit only wants rod 0, so rod 1 is not touchable yet.
+    expect(controller.allowedRodsForNextTouch(), {0});
+    final blocked = await tester.startGesture(beadOn(1, 3));
+    await blocked.moveBy(const Offset(0, -90));
+    await blocked.up();
+    await tester.pump();
+
+    expect(
+      controller.state.rods[1].value,
+      equals(0),
+      reason: 'the pointer never claimed the rod, so no bead moved',
+    );
+    expect(controller.activeCheckpointIndex, equals(0));
+
+    // Finishing the first digit really does open rod 1.
+    final allowed = await tester.startGesture(beadOn(0, 3));
+    await allowed.moveBy(const Offset(0, -90));
+    await allowed.up();
+    await tester.pump();
+    expect(controller.state.rods[0].value, equals(4));
+    expect(controller.activeCheckpointIndex, equals(1));
+    expect(controller.allowedRodsForNextTouch(), {1});
+
+    final nowAllowed = await tester.startGesture(beadOn(1, 0));
+    await nowAllowed.moveBy(const Offset(0, -90));
+    await nowAllowed.up();
+    await tester.pump();
+    expect(controller.state.rods[1].value, equals(1));
+    expect(controller.state.value, equals(14));
+    expect(controller.activeCheckpointIndex, equals(2));
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('an interrupted gesture leaves the beads where they were',
+      (tester) async {
+    tester.view.physicalSize = const Size(480, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    SharedPreferences.setMockInitialValues({});
+
+    final controller = SorobanController(generator: _FixedTerms([4, 5]));
+    addTearDown(() => controller.dispose());
+    controller.startPracticeProblem(ProblemCategory.addition, Difficulty.easy);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 320,
+                height: 600,
+                child: SorobanView(showDigitalReadout: false),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final canvas = find
+        .descendant(
+          of: find.byType(SorobanView),
+          matching: find.byType(CustomPaint),
+        )
+        .first;
+    final layout = SorobanLayout(size: tester.getSize(canvas), totalRods: 7);
+    final origin = tester.getTopLeft(canvas);
+
+    // Half-way to 4, then the app goes to the background.
+    final finger = await tester.startGesture(origin +
+        Offset(
+          layout.rodCenterX(0),
+          layout.computeEarthY(0, 0) + layout.beadHeight / 2,
+        ));
+    await finger.moveBy(const Offset(0, -30));
+    await tester.pump();
+    tester.binding.handleAppLifecycleStateChanged(
+      AppLifecycleState.paused,
+    );
+    await tester.pump();    // The board is the truth: the float stays, nothing is rolled back, and the
+    // finger is no longer tracked.
+    expect(controller.state.rods[0].value, equals(0));
+    expect(controller.hasActiveGesture, isFalse);
     expect(tester.takeException(), isNull);
   });
 

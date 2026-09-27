@@ -79,6 +79,10 @@ class MultiplicationEngine {
             digitIndex: i, // active multiplicand digit
             rodIndex: baseRod,
             atomicMoves: moves,
+            plan: additionEngine.planForPartialProduct(
+              startState: prevState,
+              endState: runningState,
+            ),
             label: '$aDigit × $bDigit = $partial',
           ));
         }

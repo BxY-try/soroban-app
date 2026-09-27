@@ -44,7 +44,7 @@ class SorobanView extends StatefulWidget {
 }
 
 class _SorobanViewState extends State<SorobanView>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   /// Longest press that still counts as a tap. Mirrors the old arena deadline:
   /// a held-down finger lifts without toggling, it just does nothing.
   static const Duration _tapWindow = Duration(milliseconds: 400);
@@ -69,6 +69,7 @@ class _SorobanViewState extends State<SorobanView>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _animController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 200),
@@ -84,8 +85,19 @@ class _SorobanViewState extends State<SorobanView>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _animController.dispose();
     super.dispose();
+  }
+
+  /// A gesture that gets cut off by the app leaving the foreground is void, but
+  /// the beads are not: whatever the fingers left stays, and the next touch
+  /// re-reads progress from the board.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) return;
+    if (_sessions.isEmpty) return;
+    _clearSessions(context.read<SorobanController>());
   }
 
   @override
@@ -125,7 +137,9 @@ class _SorobanViewState extends State<SorobanView>
   ///
   /// Pointer-down only claims a rod; the session contributes to this map once
   /// it has travelled past the slop, which is the same moment the beads used to
-  /// detach from the frame.
+  /// detach from the frame. Two fingers on one rod (heaven and earth) merge
+  /// into a single entry, which is what lets a `9` be set with both decks
+  /// moving at once.
   Map<int, BeadDragState> _dragStates() {
     if (_sessions.isEmpty) return const {};
 
@@ -133,17 +147,25 @@ class _SorobanViewState extends State<SorobanView>
     for (final session in _sessions.values) {
       if (!session.dragging) continue;
       states ??= <int, BeadDragState>{};
-      states[session.rodIndex] = BeadDragState(
-        earthY: session.currentEarthY,
-        heavenY: session.currentHeavenY,
-      );
+      final other = states[session.rodIndex];
+      states[session.rodIndex] = session.isEarthDeck
+          ? BeadDragState(
+              earthY: session.currentEarthY,
+              heavenY: other?.heavenY,
+            )
+          : BeadDragState(
+              earthY: other?.earthY,
+              heavenY: session.currentHeavenY,
+            );
     }
     return states ?? const {};
   }
 
-  /// Drops every live session without committing, e.g. because the controller
-  /// took the abacus over for a hint animation.
-  void _clearSessions() {
+  /// Drops every live session and voids the gesture, e.g. because a hint
+  /// animation or the platform took the abacus over. The board is left exactly
+  /// as the fingers left it.
+  void _clearSessions(SorobanController controller) {
+    controller.abortGesture();
     if (_sessions.isEmpty) return;
     _sessions.clear();
     setState(() {});
@@ -188,7 +210,8 @@ class _SorobanViewState extends State<SorobanView>
           onPointerDown: (event) => _handlePointerDown(event, controller),
           onPointerMove: (event) => _handlePointerMove(event, controller),
           onPointerUp: (event) => _handlePointerUp(event, controller),
-          onPointerCancel: _handlePointerCancel,
+          onPointerCancel: (event) =>
+              _handlePointerCancel(event, controller),
           child: CustomPaint(
             size: Size(constraints.maxWidth, constraints.maxHeight),
             painter: SorobanPainter(
@@ -278,11 +301,13 @@ class _SorobanViewState extends State<SorobanView>
 
   // ── Pointer Handlers (one per finger) ──────────────────────
 
-  /// Claims the rod under [event] for that finger alone.
+  /// Claims the rod and deck under [event] for that finger alone.
   ///
-  /// Landing on the beam, on the frame, or on a rod another finger already
-  /// holds does nothing: the session is simply never created, so its later
-  /// move/up events fall through untouched.
+  /// A pointer is dropped when it lands on the frame, on the beam, on a deck
+  /// another finger already holds, or on a rod the active checkpoint does not
+  /// allow yet. The session is then simply never created, so this finger's later
+  /// move/up events fall through untouched — the same silent drop two fingers on
+  /// one deck have always had.
   void _handlePointerDown(
     PointerDownEvent event,
     SorobanController controller,
@@ -292,11 +317,16 @@ class _SorobanViewState extends State<SorobanView>
     final layout = _getLayout(controller.state.rods.length);
     final hit = layout.hitTest(event.localPosition);
     if (hit == null) return;
-    if (_isRodHeld(hit.rodIndex)) return;
+
+    final isEarth = hit.deck == 'earth';
+    if (_isDeckHeld(hit.rodIndex, isEarth)) return;
+    if (!controller.allowedRodsForNextTouch().contains(hit.rodIndex)) return;
 
     final rod = controller.state.rods[hit.rodIndex];
-    final isEarth = hit.deck == 'earth';
     final currentEarth = rod.earth;
+
+    controller.beginGesture();
+    controller.trackGesturePointer(event.pointer);
 
     _sessions[event.pointer] = _BeadPointerSession(
       rodIndex: hit.rodIndex,
@@ -328,7 +358,7 @@ class _SorobanViewState extends State<SorobanView>
     // A hint/replay animation grabbed the abacus: drop the finger's session
     // rather than fighting it for the same beads.
     if (controller.isAnimating) {
-      _clearSessions();
+      _clearSessions(controller);
       return;
     }
 
@@ -363,6 +393,10 @@ class _SorobanViewState extends State<SorobanView>
   /// Commits this finger's rod: the drag lands where it was released, and a
   /// short press is the optional tap-to-toggle shortcut. Rods held by other
   /// fingers are untouched, so they keep floating until their own finger lifts.
+  ///
+  /// When the last finger of the gesture goes up, the controller gets its one
+  /// chance to reconcile the checkpoint chain. Two fingers lifting in the same
+  /// frame therefore produce exactly one reconciliation, not one per commit.
   void _handlePointerUp(
     PointerUpEvent event,
     SorobanController controller,
@@ -371,7 +405,7 @@ class _SorobanViewState extends State<SorobanView>
     if (session == null) return;
 
     if (controller.isAnimating) {
-      setState(() {});
+      _clearSessions(controller);
       return;
     }
 
@@ -382,19 +416,33 @@ class _SorobanViewState extends State<SorobanView>
       _handleTap(session, event.localPosition, controller);
     }
 
+    if (_sessions.isEmpty) {
+      controller.endGesture();
+    }
+
     setState(() {});
   }
 
-  /// The gesture was taken away (e.g. the platform claimed it), so the beads
-  /// snap back without committing.
-  void _handlePointerCancel(PointerCancelEvent event) {
+  /// The gesture was taken away (e.g. the platform claimed it), so the gesture
+  /// record is void. No rollback: the beads snap back only insofar as the commit
+  /// never happened, and progress re-reads from the board on the next touch.
+  void _handlePointerCancel(
+    PointerCancelEvent event,
+    SorobanController controller,
+  ) {
     if (_sessions.remove(event.pointer) == null) return;
+    controller.abortGesture();
     setState(() {});
   }
 
-  bool _isRodHeld(int rodIndex) {
+  /// One finger per rod *deck*. Two fingers on the same deck would fight over
+  /// the same beads, but heaven and earth on one rod are two different decks and
+  /// are meant to be set together.
+  bool _isDeckHeld(int rodIndex, bool isEarthDeck) {
     for (final session in _sessions.values) {
-      if (session.rodIndex == rodIndex) return true;
+      if (session.rodIndex == rodIndex && session.isEarthDeck == isEarthDeck) {
+        return true;
+      }
     }
     return false;
   }
