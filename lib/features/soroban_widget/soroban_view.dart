@@ -92,7 +92,7 @@ class _SorobanViewState extends State<SorobanView>
 
   /// A gesture that gets cut off by the app leaving the foreground is void, but
   /// the beads are not: whatever the fingers left stays, and the next touch
-  /// re-reads progress from the board.
+  /// reconciles whatever the board then says.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) return;
@@ -161,11 +161,10 @@ class _SorobanViewState extends State<SorobanView>
     return states ?? const {};
   }
 
-  /// Drops every live session and voids the gesture, e.g. because a hint
-  /// animation or the platform took the abacus over. The board is left exactly
-  /// as the fingers left it.
+  /// Drops every live session, e.g. because a hint animation or the platform
+  /// took the abacus over. The board is left exactly as the fingers left it and
+  /// the chain is left for the next real gesture to reconcile.
   void _clearSessions(SorobanController controller) {
-    controller.abortGesture();
     if (_sessions.isEmpty) return;
     _sessions.clear();
     setState(() {});
@@ -303,11 +302,11 @@ class _SorobanViewState extends State<SorobanView>
 
   /// Claims the rod and deck under [event] for that finger alone.
   ///
-  /// A pointer is dropped when it lands on the frame, on the beam, on a deck
-  /// another finger already holds, or on a rod the active checkpoint does not
-  /// allow yet. The session is then simply never created, so this finger's later
-  /// move/up events fall through untouched — the same silent drop two fingers on
-  /// one deck have always had.
+  /// The board is a physical abacus, so every rod is available at all times:
+  /// nothing here consults the checkpoint chain. A pointer is only dropped when
+  /// it lands on the frame or the beam, or on a deck another finger already
+  /// holds — two fingers on the same beads would fight over them, which is a
+  /// property of the beads, not of the exercise.
   void _handlePointerDown(
     PointerDownEvent event,
     SorobanController controller,
@@ -320,13 +319,9 @@ class _SorobanViewState extends State<SorobanView>
 
     final isEarth = hit.deck == 'earth';
     if (_isDeckHeld(hit.rodIndex, isEarth)) return;
-    if (!controller.allowedRodsForNextTouch().contains(hit.rodIndex)) return;
 
     final rod = controller.state.rods[hit.rodIndex];
     final currentEarth = rod.earth;
-
-    controller.beginGesture();
-    controller.trackGesturePointer(event.pointer);
 
     _sessions[event.pointer] = _BeadPointerSession(
       rodIndex: hit.rodIndex,
@@ -417,21 +412,20 @@ class _SorobanViewState extends State<SorobanView>
     }
 
     if (_sessions.isEmpty) {
-      controller.endGesture();
+      controller.reconcileCheckpoints();
     }
 
     setState(() {});
   }
 
-  /// The gesture was taken away (e.g. the platform claimed it), so the gesture
-  /// record is void. No rollback: the beads snap back only insofar as the commit
-  /// never happened, and progress re-reads from the board on the next touch.
+  /// The gesture was taken away (e.g. the platform claimed it). The beads stay
+  /// where the fingers left them and the chain is not reconciled: a gesture that
+  /// never finished is not a gesture that was completed.
   void _handlePointerCancel(
     PointerCancelEvent event,
     SorobanController controller,
   ) {
     if (_sessions.remove(event.pointer) == null) return;
-    controller.abortGesture();
     setState(() {});
   }
 

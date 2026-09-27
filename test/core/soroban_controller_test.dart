@@ -1,69 +1,22 @@
-import 'dart:math';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:soroban_app/core/engine/problem_generator.dart';
-import 'package:soroban_app/core/models/bead_move.dart';
-import 'package:soroban_app/core/models/checkpoint_plan.dart';
 import 'package:soroban_app/core/models/problem.dart';
 import 'package:soroban_app/core/state/soroban_controller.dart';
 
-/// Performs a checkpoint exactly the way the view does: one gesture, every
-/// atomic move committed inside it, then a single reconciliation when the last
-/// finger lifts.
-void performCheckpointGesture(
-  SorobanController controller,
-  DigitCheckpoint checkpoint,
-) {
-  controller.beginGesture();
-  for (final move in checkpoint.atomicMoves) {
-    if (move.kind == BeadKind.heaven) {
-      controller.tapHeavenBead(move.rodIndex);
-    } else {
-      controller.tapEarthBead(move.rodIndex, move.to);
-    }
-  }
-  controller.endGesture();
-}
-
-/// Drives one rod to an absolute value, as heaven/earth flicks.
-void setRodValue(SorobanController controller, int rodIndex, int value) {
-  final rod = controller.state.rods[rodIndex];
-  if (rod.heaven != (value >= 5)) controller.tapHeavenBead(rodIndex);
-  final earth = value % 5;
-  if (rod.earth != earth) controller.tapEarthBead(rodIndex, earth);
-}
-
-/// A value that is neither where the rod stands nor where the current group
-/// wants it, i.e. genuinely wrong work rather than partial work.
-int wrongValueFor({required int baseline, required int target}) {
-  var value = 0;
-  while (value == baseline || value == target) {
-    value++;
-  }
-  return value;
-}
-
+import '../helpers/fixed_problem.dart';
 void main() {
   group('SorobanController Reset & Replay Tests', () {
-    test('executeReset restores divergence, then rolls back to previous checkpoint', () {
-      final controller = SorobanController(
-        generator: ProblemGenerator(random: Random(3)),
-      );
-      controller.startPracticeProblem(ProblemCategory.addition, Difficulty.easy);
+    test('executeReset restores the board, then rolls back to previous checkpoint', () {
+      final controller = controllerForSum([4, 10]);
+      final cp0 = controller.currentProblem!.checkpoints[0];
 
-      final problem = controller.currentProblem!;
-      final cp0 = problem.checkpoints[0];
-
-      // 1. Move a bead without finishing the digit. This is legal: a half-done
-      // digit is a digit in progress, never divergence.
-      controller.beginGesture();
+      // 1. A value that is not a checkpoint. Nothing happens to it, and Reset
+      // takes it back to where the exercise started.
       setRodValue(controller, 0, 1);
-      controller.endGesture();
+      controller.reconcileCheckpoints();
       expect(controller.activeCheckpointIndex, equals(0));
       expect(controller.canReset, isTrue);
 
-      // Reset when divergence exists: restores to start of active checkpoint (0)
       controller.executeReset();
       expect(controller.state.value, equals(0));
       expect(controller.activeCheckpointIndex, equals(0));
@@ -79,30 +32,20 @@ void main() {
         reason: 'one snapshot entry per reached checkpoint index, appended',
       );
 
-      // 3. User tries the next checkpoint and makes a mistake: the rod ends up
-      // at a value that is neither its baseline nor the group's target.
-      final cp1 = problem.checkpoints[1];
-      final MoveGroup group = cp1.plan.groups.first;
-      final rodIndex = group.rods.first;
-      final mistake = wrongValueFor(
-        baseline: controller.state.rods[rodIndex].value,
-        target: group.targets[rodIndex]!,
-      );
+      // 3. Wander off onto a rod the next digit has nothing to do with. The
+      // board is free, so the move is kept and the chain stays where it was.
+      setRodValue(controller, 5, 9);
+      controller.reconcileCheckpoints();
 
-      controller.beginGesture();
-      setRodValue(controller, rodIndex, mistake);
-      controller.endGesture();
-
-      // Wrong work is neither rewarded nor reverted.
       expect(controller.activeCheckpointIndex, equals(1));
       expect(controller.state.value, isNot(equals(cp0.targetValue)));
 
-      // First reset: restores mistake to cp0Target
+      // First reset: back to the last completed checkpoint.
       controller.executeReset();
       expect(controller.state.value, equals(cp0.targetValue));
       expect(controller.activeCheckpointIndex, equals(1));
 
-      // Second reset (retri checkpoint previously): rolls back to checkpoint 0 start (value 0)
+      // Second reset: back one more.
       controller.executeReset();
       expect(controller.state.value, equals(0));
       expect(controller.activeCheckpointIndex, equals(0));
@@ -115,11 +58,7 @@ void main() {
       // first advance would still pass an index write (it rewrites entry 0 in
       // place, so nothing is out of range and only the entry count is wrong),
       // and it is the second advance that goes out of range for real.
-      final controller = SorobanController(
-        generator: ProblemGenerator(random: Random(3)),
-      );
-      controller.startPracticeProblem(ProblemCategory.addition, Difficulty.easy);
-
+      final controller = controllerForSum([4, 10]);
       final checkpoints = controller.currentProblem!.checkpoints;
       expect(checkpoints.length, greaterThanOrEqualTo(2));
 

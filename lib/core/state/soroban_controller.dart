@@ -2,12 +2,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../engine/addition_engine.dart';
-import '../engine/checkpoint_reconciler.dart';
 import '../engine/hint_engine.dart';
 import '../engine/problem_generator.dart';
 import '../models/bead_move.dart';
-import '../models/checkpoint_plan.dart';
-import '../models/gesture_transaction.dart';
 import '../models/problem.dart';
 import '../models/soroban_state.dart';
 import '../services/sound_service.dart';
@@ -214,25 +211,25 @@ class SorobanController extends ChangeNotifier {
     _trailBeads.clear();
     _animatingBeadKey = null;
     _lastHintCheckpointIndex = null;
-    _gesture = null;
     notifyListeners();
   }
 
   // --- Manual Bead Gestures ---
   //
-  // A manual move and an animated move now go through exactly the same code:
-  // both build a BeadMove and both are applied by AdditionEngine.applyMove.
-  // The two paths used to diverge — the manual one poked Rod.copyWith and
-  // advanced checkpoints by itself, the animated one used BeadMove and
-  // advanced nothing — and that split is what made multi-finger gestures
-  // impossible to validate.
+  // A manual move and an animated move share one write path: both describe the
+  // change as a BeadMove and both go through AdditionEngine.applyMove, so the
+  // bounds checks and the resulting Rod cannot drift apart.
+  //
+  // Nothing here looks at checkpoints. A gesture is free to land anywhere; the
+  // chain is read once, at quiescence, in reconcileCheckpoints().
   void tapHeavenBead(int rodIndex) {
     if (_isAnimating) return;
     if (rodIndex < 0 || rodIndex >= _state.rods.length) return;
 
     final currentRod = _state.rods[rodIndex];
     final newHeaven = !currentRod.heaven;
-    _applyManualMove(
+    _state = additionEngine.applyMove(
+      _state,
       BeadMove(
         rodIndex: rodIndex,
         kind: BeadKind.heaven,
@@ -242,6 +239,7 @@ class SorobanController extends ChangeNotifier {
     );
 
     _recordTrail('rod_${rodIndex}_heaven');
+    SoundService().playClack();
     notifyListeners();
   }
 
@@ -258,7 +256,8 @@ class SorobanController extends ChangeNotifier {
         ? (targetCount > 0 ? targetCount - 1 : 0)
         : targetCount;
 
-    _applyManualMove(
+    _state = additionEngine.applyMove(
+      _state,
       BeadMove(
         rodIndex: rodIndex,
         kind: BeadKind.earth,
@@ -268,188 +267,96 @@ class SorobanController extends ChangeNotifier {
     );
 
     _recordTrail('rod_${rodIndex}_earth_$newCount');
+    SoundService().playClack();
     notifyListeners();
   }
 
-  /// Applies a manually performed [move] and files it under the active gesture.
-  ///
-  /// The transaction is created lazily so a single commit is already a complete
-  /// (one-move) gesture; the view's pointer bookkeeping only adds to it.
-  void _applyManualMove(BeadMove move) {
-    final gesture = _ensureGesture();
-    _state = additionEngine.applyMove(_state, move);
-    gesture.moves.add(move);
-    gesture.touchedRods.add(move.rodIndex);
-    SoundService().playClack();
-  }
-
-  // --- Gesture Transaction (multi-touch) ---
+  // --- Checkpoint Progression ---
   //
-  // A gesture spans from the first finger claiming a rod until the last one
-  // lifts. It is a record, not a container for progress: the board always holds
-  // the truth, which is what lets an interrupted gesture be dropped without
-  // rolling anything back.
-  int _gestureSeq = 0;
-  GestureTransaction? _gesture;
+  // Progression is derived from the board, never from a plan and never from a
+  // per-commit check. SorobanState.value encodes every rod, so a matching value
+  // means the board is exactly the one that checkpoint describes — there is
+  // nothing else to verify, and nothing to refuse.
 
-  /// The gesture currently in flight, if any. Diagnostics and tests only.
-  GestureTransaction? get activeGesture => _gesture;
-
-  bool get hasActiveGesture => _gesture != null;
-
-  GestureTransaction _ensureGesture() {
-    return _gesture ??= GestureTransaction(
-      id: 'g${++_gestureSeq}',
-      baselineState: _state.clone(),
-    );
-  }
-
-  /// Opens a gesture. Called by the view when a finger claims a rod; safe to
-  /// call for every finger of the same gesture, since only the first creates it.
-  void beginGesture() {
-    if (_isAnimating) return;
-    _ensureGesture();
-  }
-
-  /// Records a participating pointer. Diagnostics only.
-  void trackGesturePointer(int pointer) {
-    _gesture?.pointerIds.add(pointer);
-  }
-
-  /// Quiescence: the last finger lifted, so this is the one moment the active
-  /// checkpoint may be advanced or the board corrected.
-  void endGesture() {
-    final gesture = _gesture;
-    _gesture = null;
-    if (gesture == null || _isAnimating) return;
-    _reconcileGesture(gesture);
-  }
-
-  /// The gesture never got to finish: a platform cancel, a hint taking the
-  /// abacus over, or the app going to the background. The board is left exactly
-  /// as the fingers left it, and any group already satisfied re-reads itself
-  /// from the board on the next gesture.
-  void abortGesture() {
-    _gesture = null;
-  }
-
-  /// Rods a new finger may claim, derived from the board and the active plan.
+  /// Reconciles the checkpoint chain against the current board.
   ///
-  /// Everything the finger needs to know is decided here, so the view never has
-  /// to reason about checkpoints. With no active problem (free play) every rod
-  /// is open.
-  Set<int> allowedRodsForNextTouch() {
-    final all = {for (var i = 0; i < _state.rods.length; i++) i};
-    final plan = activeCheckpointPlan;
-    if (plan == null) return all;
-    final allowed = CheckpointReconciler.allowedRodsForNextTouch(_state, plan);
-    return allowed.isEmpty ? all : allowed;
-  }
-
-  /// Plan of the checkpoint being worked on, or null when there is nothing to
-  /// work on (no problem, or all checkpoints already done).
-  CheckpointPlan? get activeCheckpointPlan {
-    final problem = _currentProblem;
-    if (problem == null) return null;
-    if (_activeCheckpointIndex >= problem.checkpoints.length) return null;
-    return problem.checkpoints[_activeCheckpointIndex].plan;
-  }
-
-  /// How many groups of the active checkpoint the board already satisfies.
+  /// Called once per physical gesture, when the last finger lifts. Everything in
+  /// between was free-form: any rod, any number of fingers, any number of
+  /// commits, landing wherever it landed.
   ///
-  /// Purely derived — never stored — so the UI cannot drift from what
-  /// reconciliation will decide.
-  int get matchedGroupCount {
-    final plan = activeCheckpointPlan;
-    if (plan == null) return 0;
-    return CheckpointReconciler.computeMatchedGroups(_state, plan);
-  }
-
-  void _reconcileGesture(GestureTransaction gesture) {
+  /// Takes the *first* checkpoint at or after the active one whose value the
+  /// board matches. A user who lands straight on a later value has done that
+  /// much work, so the checkpoints in between count as passed — stopping on
+  /// every one of them is not a thing a physical abacus asks for. Taking the
+  /// first match rather than the furthest is what keeps a repeated target value
+  /// (as in `12 + 7 - 7`, whose checkpoints are 10, 12, 19, 12) from resolving
+  /// to the wrong one.
+  ///
+  /// No match means no match: the board stays exactly as the user left it, and
+  /// Reset stays their decision.
+  void reconcileCheckpoints() {
     final problem = _currentProblem;
     if (problem == null) return;
     final checkpoints = problem.checkpoints;
     if (_activeCheckpointIndex >= checkpoints.length) return;
 
-    // The active checkpoint plus exactly one more, which is as far as a single
-    // gesture may ever reach.
-    final plans = <CheckpointPlan>[
-      for (var i = _activeCheckpointIndex;
-          i < checkpoints.length && i < _activeCheckpointIndex + 2;
-          i++)
-        checkpoints[i].plan,
-    ];
-
-    final progress = CheckpointReconciler.reconcileChain(
-      board: _state,
-      baseline: gesture.baselineState,
-      plans: plans,
-    );
-
-    if (progress.diverged) {
-      // Out-of-order work: a rod that belongs to a later group was moved. Put
-      // the offending rods back to where the checkpoint started, with the same
-      // brass glow the hint recovery uses.
-      unawaited(_recoverFromGesture(gesture.baselineState));
-      return;
+    final value = _state.value;
+    var matched = -1;
+    for (var i = _activeCheckpointIndex; i < checkpoints.length; i++) {
+      if (checkpoints[i].targetValue == value) {
+        matched = i;
+        break;
+      }
     }
 
-    if (progress.advanced == 0) {
-      // Legal half-way work. The beads already hold it, so there is nothing to
-      // store and nothing to announce.
-      return;
-    }
+    if (matched < 0) return;
 
-    for (var step = 0; step < progress.advanced; step++) {
-      final checkpointIndex = _activeCheckpointIndex + step;
-      // Append, never assign by index: the chain is built strictly by appending,
-      // one entry per reached checkpoint. Assigning by index looks like it
-      // works and does not: the first advance quietly rewrites entry 0, so the
-      // chain never grows and the *next* advance goes out of range.
-      //
-      // When one motion settled two digits, the board the first digit would
-      // have produced is the canonical board for its value — the value/board
-      // mapping is bijective, so this is the real position, not an
-      // approximation.
-      _checkpointSnapshots.add(
-        progress.absorbedNext && step == 0
-            ? SorobanState.fromValue(
-                checkpoints[checkpointIndex].targetValue,
-                rodCount: _state.rods.length,
-              )
-            : _state.clone(),
-      );
-    }
-
-    _activeCheckpointIndex += progress.advanced;
-
-    // One entry per checkpoint index that has been reached, i.e. the state at
-    // the start of each checkpoint including the one now active. Replay and
-    // Retri both index into this chain, so a gap here would silently hand them
-    // the wrong rollback position.
-    assert(
-      _checkpointSnapshots.length == _activeCheckpointIndex + 1,
-      'snapshot chain out of sync: ${_checkpointSnapshots.length} entries for '
-      'checkpoint index $_activeCheckpointIndex',
-    );
-
+    _recordProgressThrough(matched);
     if (_activeCheckpointIndex >= checkpoints.length) {
       _handleProblemCompleted();
     }
     notifyListeners();
   }
 
-  /// Rolls the board back to [baseline] after out-of-order work.
+  /// Marks every checkpoint up to and including [through] as passed, keeping the
+  /// snapshot chain free of holes.
   ///
-  /// Only the correction is animated — the hint itself is never played
-  /// automatically, so the user keeps control of when the step is demonstrated.
-  Future<void> _recoverFromGesture(SorobanState baseline) async {
-    if (_isAnimating) return;
-    _isAnimating = true;
-    notifyListeners();
-    await _smoothRecoverDivergence(baseline, pauseAfter: false);
-    _isAnimating = false;
-    notifyListeners();
+  /// `snapshot[i]` is the board at the *start* of checkpoint `i`, which is the
+  /// board checkpoint `i - 1` produced — that is the layout Reset and Replay
+  /// have always indexed into, so the chain keeps its meaning and gains no
+  /// holes. A skipped checkpoint never became a settled board, so its entry is
+  /// the canonical board for the previous checkpoint's value: the value encodes
+  /// every rod, so that is the exact position, not an approximation. Only the
+  /// last entry is the board the user actually has in front of them.
+  void _recordProgressThrough(int through) {
+    final checkpoints = _currentProblem!.checkpoints;
+
+    while (_checkpointSnapshots.length <= through) {
+      final index = _checkpointSnapshots.length;
+      _checkpointSnapshots.add(
+        SorobanState.fromValue(
+          checkpoints[index - 1].targetValue,
+          rodCount: _state.rods.length,
+        ),
+      );
+    }
+
+    // The board after the last crossed checkpoint is the start of the next one.
+    if (_checkpointSnapshots.length <= through + 1) {
+      _checkpointSnapshots.add(_state.clone());
+    } else {
+      // Replaying a digit the chain already knows: refresh that entry in place
+      // rather than appending a duplicate.
+      _checkpointSnapshots[through + 1] = _state.clone();
+    }
+
+    _activeCheckpointIndex = through + 1;
+
+    assert(
+      _checkpointSnapshots.length == _activeCheckpointIndex + 1,
+      'snapshot chain out of sync: ${_checkpointSnapshots.length} entries for '
+      'checkpoint index $_activeCheckpointIndex',
+    );
   }
 
   void _recordTrail(String beadKey) {
@@ -519,8 +426,6 @@ class SorobanController extends ChangeNotifier {
 
     if (hintResult == null) return;
 
-    // The animation takes the abacus over: any half-finished gesture is void.
-    _gesture = null;
     _isAnimating = true;
     notifyListeners();
 
@@ -537,14 +442,9 @@ class SorobanController extends ChangeNotifier {
     // Track hint execution for Replay gating
     _lastHintCheckpointIndex = hintResult.checkpointIndex;
 
-    // Sync snapshot without duplicates
-    final newIdx = hintResult.checkpointIndex + 1;
-    if (_checkpointSnapshots.length <= newIdx) {
-      _checkpointSnapshots.add(_state.clone());
-    } else {
-      _checkpointSnapshots[newIdx] = _state.clone();
-    }
-    _activeCheckpointIndex = newIdx;
+    // Same bookkeeping as a manual gesture, so the chain can never end up with
+    // a hole no matter which path advanced it.
+    _recordProgressThrough(hintResult.checkpointIndex);
     _animatingBeadKey = null;
     _isAnimating = false;
 
@@ -571,7 +471,6 @@ class SorobanController extends ChangeNotifier {
 
     if (replayResult == null) return;
 
-    _gesture = null;
     _isAnimating = true;
     // 1. Rollback to state before this digit
     _state = replayResult.fromState.clone();
@@ -583,14 +482,9 @@ class SorobanController extends ChangeNotifier {
     // 2. Play chained animation again
     await _playChainedMoves(replayResult.moves);
 
-    // Update snapshot without duplicating
-    final targetIdx = replayIdx + 1;
-    if (_checkpointSnapshots.length <= targetIdx) {
-      _checkpointSnapshots.add(_state.clone());
-    } else {
-      _checkpointSnapshots[targetIdx] = _state.clone();
-    }
-    _activeCheckpointIndex = targetIdx;
+    // Replay re-runs one digit that was already hinted, so the chain already
+    // covers this index; recording it again just refreshes the board.
+    _recordProgressThrough(replayIdx);
     _animatingBeadKey = null;
     _isAnimating = false;
 
@@ -633,15 +527,9 @@ class SorobanController extends ChangeNotifier {
 
   /// Smoothly recovers from divergence by restoring each divergent rod one-by-one
   /// with brass glow and delay, so the user can see exactly which rods were wrong.
-  ///
-  /// When [pauseAfter] is true an extra pause follows, giving the user time to
-  /// register the correct position before a hint animation starts. A correction
-  /// triggered by the user's own out-of-order move passes false: nothing is
-  /// about to be demonstrated, so the wait would only get in the way.
-  Future<void> _smoothRecoverDivergence(
-    SorobanState validState, {
-    bool pauseAfter = true,
-  }) async {
+  /// After all rods are restored, an extra pause gives the user time to register
+  /// the correct position before the hint animation begins.
+  Future<void> _smoothRecoverDivergence(SorobanState validState) async {
     final totalRods = _state.rods.length;
 
     // Collect indices of rods that differ from the valid state
@@ -681,8 +569,6 @@ class SorobanController extends ChangeNotifier {
 
     _animatingBeadKey = null;
     notifyListeners();
-
-    if (!pauseAfter) return;
 
     // Extra pause after all rods are corrected, before hint starts
     // This lets the user register the correct position

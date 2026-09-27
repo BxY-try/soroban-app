@@ -1,5 +1,4 @@
 import 'bead_move.dart';
-import 'checkpoint_plan.dart';
 
 /// Categories of mathematical operations supported by the app.
 enum ProblemCategory {
@@ -45,15 +44,6 @@ class DigitCheckpoint {
   /// Sequence of physical finger flick moves executing this full digit.
   final List<BeadMove> atomicMoves;
 
-  /// Which rods may be touched in which order to execute this digit.
-  ///
-  /// [atomicMoves] says *what* the digit costs; this says *what the user is
-  /// allowed to do at any point in time*, which a flat move list cannot
-  /// express. A single digit may span several groups (`999 -> 1000` is three
-  /// ordered rods) and one group may be finished with several fingers at once
-  /// (a `9` is heaven + earth on the same rod).
-  final CheckpointPlan plan;
-
   /// Human-readable label (e.g., "+20000", "+90", "-400").
   final String label;
 
@@ -64,7 +54,6 @@ class DigitCheckpoint {
     required this.digitIndex,
     required this.rodIndex,
     required this.atomicMoves,
-    required this.plan,
     required this.label,
   });
 
