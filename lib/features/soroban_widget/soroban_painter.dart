@@ -5,59 +5,28 @@ import '../../shared/theme.dart';
 import 'bead_drag_state.dart';
 import 'soroban_layout.dart';
 
-/// Procedural CustomPainter that renders a 7-rod Japanese Soroban (sempoa)
-/// with natural wood textures, bi-conical diamond beads, brass accents,
-/// dividing beam with unit dots, and trail glow effects.
+/// Paints everything on a Soroban that never moves: the walnut frame, the inner
+/// board, the rods, the dividing beam and its unit dots.
 ///
-/// Supports smooth sliding animation via [previousState] and [animationProgress]:
-/// when animationProgress is between 0..1, bead Y positions are interpolated
-/// between their previous and target positions.
-class SorobanPainter extends CustomPainter {
-  final SorobanState state;
-  final bool perRodColor;
-  final String? animatingBeadKey;
-  final Map<String, DateTime> trailBeads;
+/// It lives in its own painter (and its own `RepaintBoundary` in `SorobanView`)
+/// so this part is rasterised once and then reused, instead of being re-recorded
+/// on every animation frame and every pointer move. It only repaints when the
+/// geometry inputs change; a size change repaints it through layout.
+class SorobanFramePainter extends CustomPainter {
+  final int totalRods;
 
-  /// Previous soroban state for interpolating bead positions during animation.
-  final SorobanState? previousState;
-
-  /// Animation progress 0.0 (at previousState) to 1.0 (at state). Values >= 1 mean no animation.
-  final double animationProgress;
-
-  /// Rod index -> floating bead positions for every rod currently held down.
-  ///
-  /// Multi-touch: the map can hold several rods at once, so each finger drags
-  /// its own deck in real time. Rods missing from the map render from [state]
-  /// (or the slide animation) as usual.
-  final Map<int, BeadDragState> dragStates;
-
-  /// Extra bead travel (px) granted to each deck, paid for by the bead budget
-  /// so beads keep their size when the widget grows. See [SorobanLayout].
+  /// See [SorobanLayout]; must match the value the bead layer uses.
   final double travelBoost;
 
-  SorobanPainter({
-    required this.state,
-    required this.perRodColor,
-    required this.animatingBeadKey,
-    required this.trailBeads,
-    this.previousState,
-    this.animationProgress = 1.0,
-    this.dragStates = const {},
+  const SorobanFramePainter({
+    required this.totalRods,
     this.travelBoost = 0.0,
   });
-
-  // Layout constants forwarded from SorobanLayout for backward compatibility
-  static const double frameBorder = SorobanLayout.frameBorder;
-  static const double beamHeight = SorobanLayout.beamHeight;
-  static const double beadGap = SorobanLayout.beadGap;
-  static const double deckPadding = SorobanLayout.deckPadding;
-  static const double beadScale = SorobanLayout.beadScale;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (size.width <= 0 || size.height <= 0) return;
 
-    final totalRods = state.rods.length;
     final layout = SorobanLayout(
       size: size,
       totalRods: totalRods,
@@ -132,6 +101,88 @@ class SorobanPainter extends CustomPainter {
         );
       }
     }
+  }
+
+  @override
+  bool shouldRepaint(covariant SorobanFramePainter oldDelegate) {
+    return oldDelegate.totalRods != totalRods ||
+        oldDelegate.travelBoost != travelBoost;
+  }
+}
+
+/// Procedural CustomPainter that renders the beads of a 7-rod Japanese Soroban
+/// (sempoa) with bi-conical diamond beads, brass accents and touch feedback.
+///
+/// The static frame is [SorobanFramePainter]; this painter draws on top of it
+/// and leaves the background transparent.
+///
+/// Supports smooth sliding animation via [previousState] and [animationProgress]:
+/// when animationProgress is between 0..1, bead Y positions are interpolated
+/// between their previous and target positions.
+class SorobanPainter extends CustomPainter {
+  final SorobanState state;
+  final bool perRodColor;
+  final String? animatingBeadKey;
+
+  /// Unused: kept so existing call sites keep compiling. The trail highlight is
+  /// not drawn by this painter.
+  final Map<String, DateTime> trailBeads;
+
+  /// Previous soroban state for interpolating bead positions during animation.
+  final SorobanState? previousState;
+
+  /// Animation progress 0.0 (at previousState) to 1.0 (at state). Values >= 1 mean no animation.
+  final double animationProgress;
+
+  /// Rod index -> floating bead positions for every rod currently held down
+  /// (or gliding to rest after its finger lifted).
+  ///
+  /// Multi-touch: the map can hold several rods at once, so each finger drags
+  /// its own deck in real time. Rods missing from the map render from [state]
+  /// (or the slide animation) as usual.
+  final Map<int, BeadDragState> dragStates;
+
+  /// Rod index -> what fingers currently touch on that rod, from pointer-down.
+  /// Drives the "you are holding this" cue: a soft band over the held deck and
+  /// a lifted, outlined grabbed bead.
+  final Map<int, RodTouch> touches;
+
+  /// Extra bead travel (px) granted to each deck, paid for by the bead budget
+  /// so beads keep their size when the widget grows. See [SorobanLayout].
+  final double travelBoost;
+
+  SorobanPainter({
+    required this.state,
+    required this.perRodColor,
+    required this.animatingBeadKey,
+    this.trailBeads = const {},
+    this.previousState,
+    this.animationProgress = 1.0,
+    this.dragStates = const {},
+    this.touches = const {},
+    this.travelBoost = 0.0,
+  });
+
+  // Layout constants forwarded from SorobanLayout for backward compatibility
+  static const double frameBorder = SorobanLayout.frameBorder;
+  static const double beamHeight = SorobanLayout.beamHeight;
+  static const double beadGap = SorobanLayout.beadGap;
+  static const double deckPadding = SorobanLayout.deckPadding;
+  static const double beadScale = SorobanLayout.beadScale;
+
+  /// How much a grabbed bead grows, so it reads as lifted off the rod.
+  static const double _heldScale = 1.07;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.width <= 0 || size.height <= 0) return;
+
+    final totalRods = state.rods.length;
+    final layout = SorobanLayout(
+      size: size,
+      totalRods: totalRods,
+      travelBoost: travelBoost,
+    );
 
     // Animation progress (clamped)
     final t = animationProgress.clamp(0.0, 1.0);
@@ -152,8 +203,14 @@ class SorobanPainter extends CustomPainter {
           ? SorobanTheme.perRodColors[rodIndex % SorobanTheme.perRodColors.length]
           : SorobanTheme.beadDefaultColor;
 
-      // Floating override for this rod, if a finger is currently holding it.
+      // Floating override for this rod, if a finger is holding it.
       final drag = dragStates[rodIndex];
+
+      // What the fingers on this rod are touching, even before anything moves.
+      final touch = touches[rodIndex];
+      if (touch != null) {
+        _paintHeldBands(canvas, layout, rodCenterX, touch);
+      }
 
       // 1. Heaven Bead — drag-float or smooth slide
       double heavenY;
@@ -183,6 +240,7 @@ class SorobanPainter extends CustomPainter {
         baseColor: baseColor,
         isActive: heavenActive,
         isHighlightGlow: isHeavenAnimating,
+        isHeld: touch?.heavenHeld ?? false,
       );
 
       // 2. Earth Beads (4 beads) — drag-float or smooth slide
@@ -202,6 +260,7 @@ class SorobanPainter extends CustomPainter {
             baseColor: baseColor,
             isActive: isActive,
             isHighlightGlow: false,
+            isHeld: touch?.earthGrabbedIndex == b,
           );
         }
       } else {
@@ -232,9 +291,60 @@ class SorobanPainter extends CustomPainter {
             baseColor: baseColor,
             isActive: isThisBeadActive,
             isHighlightGlow: isEarthAnimating,
+            isHeld: touch?.earthGrabbedIndex == b,
           );
         }
       }
+    }
+  }
+
+  /// A soft band behind the deck(s) of a rod a finger is holding.
+  ///
+  /// A fingertip hides the bead it grabbed, so marking the bead alone is not
+  /// enough feedback; the band is wider than the bead and stays visible around
+  /// the finger. Flat fill, no blur.
+  void _paintHeldBands(
+    Canvas canvas,
+    SorobanLayout layout,
+    double centerX,
+    RodTouch touch,
+  ) {
+    final inner = layout.innerRect;
+    // Wider than the bead, but never wider than the rod's own column, so the
+    // bands of two neighbouring held rods do not overlap into a darker strip.
+    final wanted = layout.beadWidth * 1.3;
+    final halfWidth =
+        (wanted < layout.rodSpacing ? wanted : layout.rodSpacing) / 2;
+    final paint = Paint()
+      ..color = SorobanTheme.beadActiveColor.withValues(alpha: 0.18);
+
+    if (touch.heavenHeld) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTRB(
+            centerX - halfWidth,
+            inner.top,
+            centerX + halfWidth,
+            layout.beamTop,
+          ),
+          const Radius.circular(8),
+        ),
+        paint,
+      );
+    }
+    if (touch.earthHeld) {
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTRB(
+            centerX - halfWidth,
+            layout.beamTop + SorobanLayout.beamHeight,
+            centerX + halfWidth,
+            inner.bottom,
+          ),
+          const Radius.circular(8),
+        ),
+        paint,
+      );
     }
   }
 
@@ -243,6 +353,9 @@ class SorobanPainter extends CustomPainter {
   /// - Upper half: base color
   /// - Lower half: slightly darker shade of the same color (flat shadow effect)
   /// - No glossy textures or specular highlights; calm, clean, and comfortable.
+  ///
+  /// A [isHeld] bead (a finger is on it) is drawn slightly larger with a dark
+  /// outline so it visibly lifts off the rod.
   void _drawBead({
     required Canvas canvas,
     required double centerX,
@@ -252,10 +365,12 @@ class SorobanPainter extends CustomPainter {
     required Color baseColor,
     required bool isActive,
     required bool isHighlightGlow,
+    bool isHeld = false,
     double scale = beadScale,
   }) {
-    final scaledWidth = width * scale;
-    final scaledHeight = height * scale;
+    final effectiveScale = isHeld ? scale * _heldScale : scale;
+    final scaledWidth = width * effectiveScale;
+    final scaledHeight = height * effectiveScale;
     final halfW = scaledWidth / 2;
     final halfH = scaledHeight / 2;
     final centerY = y + (height / 2);
@@ -292,7 +407,8 @@ class SorobanPainter extends CustomPainter {
       ..close();
 
     if (isHighlightGlow) {
-      // Golden halo glow during hint animation
+      // Golden halo glow during hint animation. The blur is affordable here
+      // because at most a bead or two glow at a time.
       final glowPaint = Paint()
         ..color = SorobanTheme.brassGlowColor.withValues(alpha: 0.60)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8.0);
@@ -325,10 +441,11 @@ class SorobanPainter extends CustomPainter {
       final topColor = perRodColor ? baseColor : SorobanTheme.beadActiveColor;
       final bottomColor = Color.lerp(topColor, Colors.black, 0.18)!;
 
-      // Soft diffused elevation shadow
-      final shadowPaint = Paint()
-        ..color = Colors.black.withValues(alpha: 0.10)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.0);
+      // Elevation shadow. A flat, low-alpha offset copy of the bead: it used to
+      // be a blurred mask filter, and up to 35 blurred paths per frame is the
+      // most expensive thing this painter can ask the GPU for. At alpha 0.10
+      // and a 1.5px offset the two are hard to tell apart.
+      final shadowPaint = Paint()..color = Colors.black.withValues(alpha: 0.10);
       canvas.drawPath(outerPath.shift(const Offset(0.0, 1.5)), shadowPaint);
 
       // Upper half: flat base color
@@ -382,10 +499,24 @@ class SorobanPainter extends CustomPainter {
         ..strokeWidth = 0.8;
       canvas.drawPath(outerPath, borderPaint);
     }
+
+    if (isHeld) {
+      // "A finger is on this bead": dark walnut outline over whatever style the
+      // bead has, so it reads the same whether active, inactive or glowing.
+      final heldPaint = Paint()
+        ..color = SorobanTheme.frameColor.withValues(alpha: 0.90)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2
+        ..strokeJoin = StrokeJoin.round;
+      canvas.drawPath(outerPath, heldPaint);
+    }
   }
 
   @override
   bool shouldRepaint(covariant SorobanPainter oldDelegate) {
-    return true; // Always repaint when controller or animation notifies
+    // Painters are only rebuilt when the view has something new to show
+    // (a state change, a pointer move, an animation tick), so comparing fields
+    // would cost more than it saves.
+    return true;
   }
 }

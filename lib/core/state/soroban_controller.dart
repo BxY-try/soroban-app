@@ -55,6 +55,16 @@ class SorobanController extends ChangeNotifier {
   int _elapsedMilliseconds = 0;
   int get elapsedMilliseconds => _elapsedMilliseconds;
 
+  /// Whole seconds of the running challenge, for the on-screen clock.
+  ///
+  /// The clock face only changes once a second, so it listens to this instead
+  /// of the controller: a [ValueNotifier] tells its listeners only when the
+  /// value actually changes. The 100 ms tick used to call [notifyListeners],
+  /// which rebuilt every `context.watch` on the screen ten times a second to
+  /// redraw a label that changes once.
+  final ValueNotifier<int> _elapsedSeconds = ValueNotifier<int>(0);
+  ValueListenable<int> get elapsedSeconds => _elapsedSeconds;
+
   // --- Animation & Interaction Lock ---
   bool _isAnimating = false;
   bool get isAnimating => _isAnimating;
@@ -104,7 +114,11 @@ class SorobanController extends ChangeNotifier {
 
     SoundService().enabled = _soundEnabled;
     if (initAudio) {
-      await SoundService().init();
+      // Not awaited on purpose. Loading the four clack pools takes real time
+      // (asset copy plus a platform round trip each), and nothing about
+      // starting the app depends on it: a clack requested before it finishes
+      // is simply skipped. SoundService.init never throws.
+      unawaited(SoundService().init());
     }
 
     for (final cat in ProblemCategory.values) {
@@ -173,6 +187,7 @@ class SorobanController extends ChangeNotifier {
     _stopwatch.stop();
     _ticker?.cancel();
     _elapsedMilliseconds = 0;
+    _elapsedSeconds.value = 0;
 
     _currentProblem = problemGenerator.generateProblem(
       category: category,
@@ -194,9 +209,13 @@ class SorobanController extends ChangeNotifier {
     _stopwatch.reset();
     _stopwatch.start();
     _ticker?.cancel();
+    _elapsedMilliseconds = 0;
+    _elapsedSeconds.value = 0;
     _ticker = Timer.periodic(const Duration(milliseconds: 100), (_) {
       _elapsedMilliseconds = _stopwatch.elapsedMilliseconds;
-      notifyListeners();
+      // Deliberately no notifyListeners(): see [elapsedSeconds]. Everything
+      // else that changes (beads, checkpoints, completion) notifies for itself.
+      _elapsedSeconds.value = _elapsedMilliseconds ~/ 1000;
     });
 
     _currentProblem = _challengeProblems[0];
@@ -377,9 +396,9 @@ class SorobanController extends ChangeNotifier {
   }
 
   void _recordTrail(String beadKey) {
-    _trailBeads[beadKey] = DateTime.now();
-    // Clean up older trail items
     final now = DateTime.now();
+    _trailBeads[beadKey] = now;
+    // Clean up older trail items
     _trailBeads.removeWhere(
       (_, time) => now.difference(time).inMilliseconds > 1500,
     );
@@ -399,6 +418,7 @@ class SorobanController extends ChangeNotifier {
         _stopwatch.stop();
         _ticker?.cancel();
         _elapsedMilliseconds = _stopwatch.elapsedMilliseconds;
+        _elapsedSeconds.value = _elapsedMilliseconds ~/ 1000;
         _isChallengeCompleted = true;
         if (_currentProblem != null) {
           recordTimeIfBest(
@@ -618,6 +638,7 @@ class SorobanController extends ChangeNotifier {
   void dispose() {
     _ticker?.cancel();
     _stopwatch.stop();
+    _elapsedSeconds.dispose();
     super.dispose();
   }
 }

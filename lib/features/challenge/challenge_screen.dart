@@ -550,9 +550,15 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
                     color: SorobanTheme.textMuted,
                   ),
                   const SizedBox(height: 1),
-                  Text(
-                    _formatTime(controller.elapsedMilliseconds),
-                    style: SorobanTheme.timerStyle.copyWith(fontSize: 12),
+                  // Only this label listens to the clock. Watching the whole
+                  // controller for it meant rebuilding the entire screen on
+                  // every tick.
+                  ValueListenableBuilder<int>(
+                    valueListenable: controller.elapsedSeconds,
+                    builder: (context, seconds, _) => Text(
+                      _formatTime(seconds * 1000),
+                      style: SorobanTheme.timerStyle.copyWith(fontSize: 12),
+                    ),
                   ),
                 ],
               ),
