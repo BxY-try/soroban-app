@@ -176,7 +176,6 @@ class AdditionEngine {
     required int termValue,
     required bool isAddition,
     required int termIndex,
-    String Function(int signedVal, int rodIndex)? labelBuilder,
   }) {
     final checkpoints = <DigitCheckpoint>[];
     if (termValue == 0) return checkpoints;
@@ -196,12 +195,6 @@ class AdditionEngine {
       final prevState = runningState;
       runningState = applyMoves(runningState, moves);
 
-      final multiplier = _pow10(rodIndex);
-      final signedVal = signedDigit * multiplier;
-      final label = labelBuilder != null
-          ? labelBuilder(signedVal, rodIndex)
-          : (isAddition ? '+$signedVal' : '$signedVal');
-
       checkpoints.add(DigitCheckpoint(
         targetValue: runningState.value,
         previousValue: prevState.value,
@@ -209,18 +202,9 @@ class AdditionEngine {
         digitIndex: i,
         rodIndex: rodIndex,
         atomicMoves: moves,
-        label: label,
       ));
     }
 
     return checkpoints;
-  }
-
-  int _pow10(int exp) {
-    int res = 1;
-    for (int i = 0; i < exp; i++) {
-      res *= 10;
-    }
-    return res;
   }
 }

@@ -2,6 +2,8 @@ import '../models/bead_move.dart';
 import '../models/problem.dart';
 import '../models/soroban_state.dart';
 import 'addition_engine.dart';
+import 'multiplication_engine.dart';
+import 'multiplication_progress.dart';
 
 /// Result from requesting a hint.
 class HintResult {
@@ -29,14 +31,47 @@ class HintResult {
   });
 }
 
+/// Result from requesting a hint for a multiplication.
+///
+/// A multiplication has no chain to index into, so this names the contribution
+/// to add instead of a checkpoint position.
+class MultiplicationHint {
+  /// The contribution the hint adds to the board.
+  final MultiplicationContribution contribution;
+
+  /// The atomic moves that add [contribution], worked out from [fromState].
+  final List<BeadMove> moves;
+
+  /// The board the moves animate from: the user's own board, or, after
+  /// divergence, the last valid board of the user's own work.
+  final SorobanState fromState;
+
+  /// The contributions that were on [fromState], in credit order.
+  final List<int> baseOrder;
+
+  /// Whether the board was not a valid multiplication state and had to be taken
+  /// back to [fromState] first.
+  final bool recoveredFromDivergence;
+
+  const MultiplicationHint({
+    required this.contribution,
+    required this.moves,
+    required this.fromState,
+    required this.baseOrder,
+    required this.recoveredFromDivergence,
+  });
+}
+
 /// Hint and Replay Engine.
 /// Manages checkpoint navigation, chained animation generation,
 /// divergence recovery ("nyasar"), and replay state rollbacks.
 class HintEngine {
   final AdditionEngine additionEngine;
+  final MultiplicationEngine multiplicationEngine;
 
   const HintEngine({
     this.additionEngine = const AdditionEngine(),
+    this.multiplicationEngine = const MultiplicationEngine(),
   });
 
   /// Finds the currently active checkpoint index given the [currentState] of the abacus.
@@ -68,6 +103,9 @@ class HintEngine {
 
   /// Calculates the hint for the current abacus state.
   /// Returns [HintResult] containing the full chained moves to complete the active digit.
+  ///
+  /// Reads a linear chain, which is what addition, subtraction and mixed
+  /// problems are. A multiplication is not one: use [getNextMultiplicationHint].
   HintResult? getNextHint({
     required SorobanState currentState,
     required Problem problem,
@@ -133,6 +171,67 @@ class HintEngine {
       checkpointIndex: lastValidIdx,
       recoveredFromDivergence: true,
       fromState: validSnapshot,
+    );
+  }
+
+  /// The next hint for a multiplication, read from the board.
+  ///
+  /// [creditedOrder] is the contributions already credited, oldest first (see
+  /// `MultiplicationProgress.explain`).
+  ///
+  /// When the board is a valid intermediate state the hint continues from it,
+  /// whatever route got it there: the next contribution follows the user's own
+  /// pattern, and its moves are worked out from the board as it stands. Nothing
+  /// is rolled back and nothing on the board is touched.
+  ///
+  /// Only a board that is no accumulation of contributions at all is
+  /// "divergent". It is taken back to the last valid board of the user's *own*
+  /// work ([creditedOrder]), not to the start of the canonical chain.
+  ///
+  /// Returns null when there is nothing left to add.
+  MultiplicationHint? getNextMultiplicationHint({
+    required SorobanState currentState,
+    required MultiplicationProgress progress,
+    required List<int> creditedOrder,
+  }) {
+    final total = progress.contributions.length;
+    final explained = progress.explain(
+      currentState.value,
+      preferred: creditedOrder,
+    );
+
+    if (explained != null) {
+      if (explained.length >= total) return null;
+
+      final baseOrder = progress.ordered(creditedOrder, explained);
+      final next = progress.nextContribution(baseOrder);
+      if (next == null) return null;
+
+      return MultiplicationHint(
+        contribution: next,
+        moves: multiplicationEngine.contributionMoves(currentState, next),
+        fromState: currentState,
+        baseOrder: baseOrder,
+        recoveredFromDivergence: false,
+      );
+    }
+
+    // Divergent ("nyasar"): the board is not something the multiplication can
+    // explain. Go back to where the user's credited work left the board.
+    if (creditedOrder.length >= total) return null;
+    final next = progress.nextContribution(creditedOrder);
+    if (next == null) return null;
+
+    final recoverTo = SorobanState.fromValue(
+      progress.valueOf(creditedOrder),
+      rodCount: currentState.rods.length,
+    );
+    return MultiplicationHint(
+      contribution: next,
+      moves: multiplicationEngine.contributionMoves(recoverTo, next),
+      fromState: recoverTo,
+      baseOrder: List<int>.of(creditedOrder),
+      recoveredFromDivergence: true,
     );
   }
 

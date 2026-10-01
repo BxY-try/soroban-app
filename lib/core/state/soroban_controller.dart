@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../engine/addition_engine.dart';
 import '../engine/hint_engine.dart';
+import '../engine/multiplication_progress.dart';
 import '../engine/problem_generator.dart';
 import '../models/bead_move.dart';
 import '../models/problem.dart';
@@ -42,6 +43,55 @@ class SorobanController extends ChangeNotifier {
 
   int _activeCheckpointIndex = 0;
   int get activeCheckpointIndex => _activeCheckpointIndex;
+
+  // --- Multiplication Progress ---
+  //
+  // A multiplication is not a chain of boards, it is a set of digit-by-digit
+  // contributions that the board accumulates in whatever order the user likes. So
+  // for multiplication the chain is only the canonical teaching route; what counts
+  // as progress is read from the board through [MultiplicationProgress]. Every
+  // other category keeps the linear chain untouched.
+  //
+  // While a multiplication is running, [activeCheckpointIndex] is the number of
+  // contributions the board represents and the snapshot chain keeps its layout
+  // (`snapshots[k]` is the board after the first k contributions credited), so
+  // the UI, Reset and Replay keep their meaning.
+
+  /// Null for every problem that is not a multiplication, and for one whose
+  /// checkpoints are not the canonical chain of its own operands.
+  MultiplicationProgress? _multiplication;
+
+  /// Indices of the contributions the board currently represents, in the order
+  /// they were credited (oldest first). Empty outside multiplication.
+  List<int> _creditedContributions = <int>[];
+  List<int> get creditedContributions =>
+      List.unmodifiable(_creditedContributions);
+
+  /// The last multiplication hint, kept so Replay can put the board and the
+  /// credit back to where that hint started, whatever happened since.
+  MultiplicationHint? _lastMultiplicationHint;
+
+  /// Whether one digit of the current multiplication has all of its
+  /// contributions on the board. [termIndex] 0 is the multiplicand, 1 the
+  /// multiplier; [digitIndex] counts from the left.
+  ///
+  /// This is what dims a digit in the equation. It follows the board, so it is
+  /// right for any order of work, which a position in the canonical chain is not.
+  bool isMultiplicationDigitCompleted({
+    required int termIndex,
+    required int digitIndex,
+  }) {
+    final multiplication = _multiplication;
+    if (multiplication == null || _creditedContributions.isEmpty) return false;
+    if (_creditedContributions.length >= multiplication.contributions.length) {
+      return true;
+    }
+    return multiplication.isDigitComplete(
+      _creditedContributions,
+      termIndex: termIndex,
+      digitIndex: digitIndex,
+    );
+  }
 
   bool _isChallengeMode = false;
   bool get isChallengeMode => _isChallengeMode;
@@ -230,6 +280,15 @@ class SorobanController extends ChangeNotifier {
     _trailBeads.clear();
     _animatingBeadKey = null;
     _lastHintCheckpointIndex = null;
+    _creditedContributions = <int>[];
+    _lastMultiplicationHint = null;
+    final problem = _currentProblem;
+    _multiplication = problem == null
+        ? null
+        : MultiplicationProgress.forProblem(
+            problem,
+            rodCount: _state.rods.length,
+          );
     notifyListeners();
   }
 
@@ -330,9 +389,19 @@ class SorobanController extends ChangeNotifier {
   ///
   /// No match means no match: the board stays exactly as the user left it, and
   /// Reset stays their decision.
+  ///
+  /// A multiplication is reconciled differently, see
+  /// [_reconcileMultiplication]: there is no chain to match against.
   void reconcileCheckpoints() {
     final problem = _currentProblem;
     if (problem == null) return;
+
+    final multiplication = _multiplication;
+    if (multiplication != null) {
+      _reconcileMultiplication(multiplication);
+      return;
+    }
+
     final checkpoints = problem.checkpoints;
     if (_activeCheckpointIndex >= checkpoints.length) return;
 
@@ -387,6 +456,78 @@ class SorobanController extends ChangeNotifier {
     }
 
     _activeCheckpointIndex = through + 1;
+
+    assert(
+      _checkpointSnapshots.length == _activeCheckpointIndex + 1,
+      'snapshot chain out of sync: ${_checkpointSnapshots.length} entries for '
+      'checkpoint index $_activeCheckpointIndex',
+    );
+  }
+
+  /// Reconciles a multiplication against the current board.
+  ///
+  /// The board is asked what it represents: is its value the sum of some of the
+  /// multiplication's contributions? If so, those contributions are what is
+  /// credited, whatever order the user added them in and however many they added
+  /// in one gesture. `0 → 3702 → 28382` and `0 → 24680 → 28382` are the same
+  /// thing to it.
+  ///
+  /// If not, nothing happens at all: the board stays exactly as the user left it
+  /// and so does the credit. A wrong board is not progress, and it is not an
+  /// error either.
+  ///
+  /// The credit mirrors the board. Building on it extends the credit; taking the
+  /// work apart and building another valid state re-anchors it to that state,
+  /// which can be fewer contributions than before. Reset is still the way back to
+  /// the last credited board.
+  void _reconcileMultiplication(MultiplicationProgress multiplication) {
+    final total = multiplication.contributions.length;
+    if (_creditedContributions.length >= total) return;
+
+    final explained = multiplication.explain(
+      _state.value,
+      preferred: _creditedContributions,
+    );
+    if (explained == null) return;
+
+    final credited = _creditedContributions.toSet();
+    if (explained.length == credited.length && explained.containsAll(credited)) {
+      return;
+    }
+
+    _creditContributions(
+      multiplication.ordered(_creditedContributions, explained),
+    );
+    if (_creditedContributions.length >= total) {
+      _handleProblemCompleted();
+    }
+    notifyListeners();
+  }
+
+  /// Sets the credited contributions of the current multiplication to [order]
+  /// and rebuilds the snapshot chain from it.
+  ///
+  /// `snapshot[k]` is the board after the first k contributions, which the value
+  /// encodes exactly, so the chain has no holes by construction. The last entry
+  /// is the board the user has in front of them: it is only ever built for a
+  /// value the board really holds.
+  void _creditContributions(List<int> order) {
+    final multiplication = _multiplication!;
+    final rodCount = _state.rods.length;
+
+    _creditedContributions = List<int>.of(order);
+    _checkpointSnapshots
+      ..clear()
+      ..add(SorobanState.zero(rodCount: rodCount));
+
+    var running = 0;
+    for (final k in _creditedContributions) {
+      running += multiplication.contributions[k].value;
+      _checkpointSnapshots.add(
+        SorobanState.fromValue(running, rodCount: rodCount),
+      );
+    }
+    _activeCheckpointIndex = _creditedContributions.length;
 
     assert(
       _checkpointSnapshots.length == _activeCheckpointIndex + 1,
@@ -455,6 +596,12 @@ class SorobanController extends ChangeNotifier {
   Future<void> executeHint() async {
     if (_isChallengeMode || _isAnimating || _currentProblem == null) return;
 
+    final multiplication = _multiplication;
+    if (multiplication != null) {
+      await _executeMultiplicationHint(multiplication);
+      return;
+    }
+
     final hintResult = hintEngine.getNextHint(
       currentState: _state,
       problem: _currentProblem!,
@@ -499,6 +646,12 @@ class SorobanController extends ChangeNotifier {
     if (_currentProblem!.checkpoints.isEmpty) return;
     if (_lastHintCheckpointIndex == null) return;
 
+    final multiplication = _multiplication;
+    if (multiplication != null) {
+      await _replayMultiplicationHint(multiplication);
+      return;
+    }
+
     final replayIdx = _lastHintCheckpointIndex!;
 
     final replayResult = hintEngine.getReplay(
@@ -534,6 +687,93 @@ class SorobanController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Hint for a multiplication: read from the board, so it continues the route
+  /// the user is on instead of pulling them onto the canonical one. See
+  /// [HintEngine.getNextMultiplicationHint].
+  Future<void> _executeMultiplicationHint(
+    MultiplicationProgress multiplication,
+  ) async {
+    final hint = hintEngine.getNextMultiplicationHint(
+      currentState: _state,
+      progress: multiplication,
+      creditedOrder: _creditedContributions,
+    );
+    if (hint == null) return;
+
+    _clackPending = false;
+    _isAnimating = true;
+    notifyListeners();
+
+    // Only a board that is no accumulation of contributions at all gets here
+    // with a recovery, and it goes back to the user's own last valid board.
+    if (hint.recoveredFromDivergence) {
+      await _smoothRecoverDivergence(hint.fromState);
+    }
+
+    // Brief pause before starting the hint animation so user notices it's about to begin
+    await Future.delayed(const Duration(milliseconds: 400));
+
+    await _playChainedMoves(hint.moves);
+
+    if (!identical(_multiplication, multiplication)) {
+      // The problem was replaced while the hint was playing: none of it applies.
+      _animatingBeadKey = null;
+      _isAnimating = false;
+      notifyListeners();
+      return;
+    }
+
+    _lastMultiplicationHint = hint;
+    _creditContributions([...hint.baseOrder, hint.contribution.index]);
+    _lastHintCheckpointIndex = _activeCheckpointIndex - 1;
+    _animatingBeadKey = null;
+    _isAnimating = false;
+
+    if (_creditedContributions.length >= multiplication.contributions.length) {
+      _handleProblemCompleted();
+    }
+
+    notifyListeners();
+  }
+
+  /// Replays the last multiplication hint: board and credit go back to where it
+  /// started, then its moves play again.
+  Future<void> _replayMultiplicationHint(
+    MultiplicationProgress multiplication,
+  ) async {
+    final hint = _lastMultiplicationHint;
+    if (hint == null) return;
+
+    _clackPending = false;
+    _isAnimating = true;
+    // 1. Rollback to the board before this contribution
+    _creditContributions(hint.baseOrder);
+    _state = hint.fromState.clone();
+    notifyListeners();
+
+    await Future.delayed(const Duration(milliseconds: 1200));
+
+    // 2. Play chained animation again
+    await _playChainedMoves(hint.moves);
+
+    if (!identical(_multiplication, multiplication)) {
+      _animatingBeadKey = null;
+      _isAnimating = false;
+      notifyListeners();
+      return;
+    }
+
+    _creditContributions([...hint.baseOrder, hint.contribution.index]);
+    _animatingBeadKey = null;
+    _isAnimating = false;
+
+    if (_creditedContributions.length >= multiplication.contributions.length) {
+      _handleProblemCompleted();
+    }
+
+    notifyListeners();
+  }
+
   // --- Reset Execution ---
   /// Mengembalikan posisi sempoa:
   /// 1. Jika manik sedang salah/divergen dari awal checkpoint aktif: kembalikan ke awal checkpoint aktif.
@@ -555,11 +795,17 @@ class SorobanController extends ChangeNotifier {
     if (_checkpointSnapshots.length > 1 && _activeCheckpointIndex > 0) {
       _checkpointSnapshots.removeLast();
       _activeCheckpointIndex--;
+      // A multiplication credits its contributions oldest first, so a step back
+      // gives up the newest one.
+      if (_multiplication != null && _creditedContributions.isNotEmpty) {
+        _creditedContributions.removeLast();
+      }
       _state = _checkpointSnapshots.last.clone();
       _trailBeads.clear();
       _animatingBeadKey = null;
       // Reset hint tracking when going back to a previous checkpoint
       _lastHintCheckpointIndex = null;
+      _lastMultiplicationHint = null;
       notifyListeners();
     }
   }

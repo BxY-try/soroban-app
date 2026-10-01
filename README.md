@@ -11,7 +11,11 @@ Berdiri di atas `ChangeNotifier` + `provider`, dengan seluruh perhitungan mekani
 | Fitur | Penjelasan |
 |---|---|
 | **Sempoa 7 tiang interaktif** | Setiap tiang punya 1 manik langit (nilai 5) dan 4 manik bumi (nilai 1). Tiap jari/pointer diklaim satu tiang sampai terangkat, sehingga beberapa tiang bisa digeser bersamaan (**multi-touch**). |
+| **Dua jari pada satu tiang** | Sentuhan pada beam (14 px di tengah papan) tidak diabaikan: ia diarahkan ke tiang terdekat, ke sisi beam yang paling dekat, dan ke deck yang masih bebas bila deck terdekat sedang dipegang — persis teknik soroban asli (jari telunjuk di manik langit, jempol di manik bumi). Batas ini hanya berlaku di beam: menafsirkan ulang sentuhan pada manik akan membuat tap biasa membalik manik langit di mode Klik Manik. |
+| **Manik mengikuti jari dari piksel pertama** | Ambang drag hanya **1 px** (bukan `kTouchSlop` 18 px yang itu ambang tap-vs-scroll). Di layar 800×360 seluruh perjalanan satu manik hanya ~16 px, jadi flick pendek lama tidak pernah terekam sama sekali. |
 | **Fisika manik 1D rigid-body** | Saat digeser, manik yang "`mendorong`" manik di atas/bawahnya ikut terdorong, dengan jarak minimum sebesar `beadPitch` dan clamp di batas beam serta bingkai. |
+| **Glosir saat dilepas** | Manik yang dilepas tidak lagi *pop* ke slot-nya, melainkan meluncur 130 ms dari posisi terakhir jari menuju hasil commit — drag yang belum cukup jauh akan memantul balik, bukan melompat. |
+| **Sinyal "yang sedang dipegang"** | Ujung jari menutupi manik yang dicengkeramnya. Sejak pointer-down, deck yang dipegang mendapat pita soft (dibatasi lebar kolom tiang agar dua tiang bersebelahan tidak menyatu jadi strip gelap) dan manik yang dicengkeram membesar sedikit dengan outline gelap, disertai satu haptic tick. |
 | **Checkpoint per digit penuh** | Setiap digit satu `DigitCheckpoint` yang menyimpan daftar `BeadMove` atomik — satu checkpoint boleh butuh banyak tiang dan banyak gestur. |
 | **Hint berantai (Chained Animation)** | Tombol hint memutar satu checkpoint penuh, manik demi manik, dengan aksen pendar kuningan (brass glow) dan suara klak. |
 | **Recovery "Nyasar"** | Kalau papan melenceng dari checkpoint terakhir, hint memulihkan tiang yang menyimpang satu per satu supaya user melihat persis tiang mana yang salah. |
@@ -19,7 +23,10 @@ Berdiri di atas `ChangeNotifier` + `provider`, dengan seluruh perhitungan mekani
 | **Papan bebas (Free Board)** | Papan adalah sumber kebenaran. Gestur bisa mendarat di tiang mana pun; progres hanya dibaca **saat diam** (`onGestureSettled`), lalu dicocokkan ke rantai checkpoint berdasarkan nilai. |
 | **Mode Practice** | Tanpa timer, tanpa tekanan. Ganti kategori & tingkat kesulitan on-the-fly, tombol Soal Berikutnya, hint/replay/retri aktif. |
 | **Mode Tantangan** | 5 soal beruntun dengan **satu timer akumulatif** untuk seluruh sesi, plus rekor waktu terbaik per kategori × kesulitan. |
-| **Suara taktil** | 4 variasi klak kayu diputar round-robin (tanpa pengulangan beruntun) dengan jitter volume 0.80–0.88. Satu gestur = satu klak. |
+| **Suara taktil** | 4 variasi klak kayu diputar round-robin (tanpa pengulangan beruntun) dengan jitter volume 0.80–0.88. Satu gestur = satu klak. Tiap variasi punya `AudioPool` yang sudah di-preload, jadi klak pertama sebuah sesi tidak ikut menanggung biaya salin aset, dan konteksnya `mixWithOthers` sehingga klak tidak merebut fokus audio aplikasi lain. |
+| **Audio yang tidak bisu diam-diam** | Dua klak gagal berturut-turut memicu pembangunan ulang pool, dibatasi maksimal sekali per 3 detik. `init()` tidak lagi di-`await` saat startup; klak yang diminta sebelum pool selesai dimuat sengaja dilewati, bukan ditunda. |
+| **Render terpisah, nol rebuild saat drag** | Lukisan dipecah dua: `SorobanFramePainter` menggambar bingkai, tiang, dan beam ke `RepaintBoundary`-nya sendiri dan di-raster sekali, sedangkan lapisan manik saja yang repaint — digerakkan `Listenable` yang di-ping oleh event pointer dan ticker. Tidak ada `setState` selama jari bergerak. Bayangan blur pada maksimal 35 manik per frame diganti salinan flat ber-offset. |
+| **Jam tantangan tidak rebuild layar** | Tick 100 ms hanya mengisi `ValueNotifier<int> elapsedSeconds` tanpa `notifyListeners`; label `mm:ss` di `challenge_screen` adalah satu-satunya pendengarnya, sehingga layar tidak digambar ulang sepuluh kali per detik untuk label yang berubah sekali per detik. `elapsedMilliseconds` tetap ada dan terisi tepat saat sesi selesai. |
 | **Multi-sentuh & lifecycle aman** | Gestur yang terputus saat app di-background tidak me-rollback papan; sesi pointer dibersihkan dan board diteruskan apa adanya. |
 
 ---
@@ -53,6 +60,20 @@ Perkalian dipecah menjadi partial product, lalu **100% didelegasikan** move mani
 
 ---
 
+## Gestur & Render
+
+**Tiga ambang, tiga alasan.** Gestur punya ambang yang saling berbeda dan semuanya disengaja: **1 px** (`_followSlop`) untuk mulai menggerakkan manik, **8 px** (`_tapSlop`) agar press pendek tetap terhitung tap saat Klik Manik aktif, dan **400 ms** (`_tapWindow`) sebagai batas tekan terpanjang yang masih boleh dianggap tap — jari yang ditahan lalu diangkat hanya "tidak terjadi apa-apa", tidak membalik manik. Versi lama memakai `kTouchSlop` (18 px) untuk semuanya, yaitu ambang tap-vs-scroll yang sama sekali tidak sesuai untuk manik.
+
+**Klaim deck terjadi di pointer-down, bukan setelah ambang terlampaui.** `RodTouch` mencatat sejak sentuhan pertama deck mana yang diklaim jari, sehingga painter bisa menampilkan pita deck dan manik yang terangkat pada frame pertama — bahkan sebelum jarinya bergerak.
+
+**Pakai posisi pointer-up juga.** Event move terakhir bisa tertinggal satu langkah di belakang pelepasan, jadi koordinat `onPointerUp` ikut dipakai saat menghitung hasil drag.
+
+**Sinyal vs papan.** `SorobanView` punya dua `Listenable` yang sengaja dipisah: yang satu berarti "lapisan manik berubah" (di-ping oleh pointer, ticker glosir, dan animasi), yang lain "readout berubah" (hanya saat board atau setelan visual berganti). Drag karena itu tidak pernah membangun ulang readout digital.
+
+**Tidak ada yang dijadwalkan sia-sia.** Ticker glosir berhenti sendiri begitu manik terakhir tiba, sehingga tidak ada frame yang terus terjadwal setelah papan diam.
+
+---
+
 ## Struktur Proyek
 
 ```text
@@ -70,15 +91,15 @@ lib/
 │   │   ├── problem_generator.dart   # Rejection sampling per kategori & kesulitan
 │   │   └── hint_engine.dart         # getNextHint, getReplay, deteksi divergensi
 │   ├── services/
-│   │   └── sound_service.dart       # Singleton audioplayers, lowLatency, 4 variasi klak
+│   │   └── sound_service.dart       # 4 AudioPool (mediaPlayer) per variasi, mixWithOthers
 │   └── state/
-│       └── soroban_controller.dart  # ChangeNotifier: satu-satunya sumber kebenaran
+│       └── soroban_controller.dart  # ChangeNotifier + ValueNotifier elapsedSeconds
 ├── features/
 │   ├── soroban_widget/              # Sempoa sebagai widget
-│   │   ├── soroban_view.dart        # Multi-touch pointer session per tiang
-│   │   ├── soroban_painter.dart     # CustomPainter prosedural (kayu, manik bikonikal)
+│   │   ├── soroban_view.dart        # Sesi pointer per tiang, hit-test beam, pemisahan repaint
+│   │   ├── soroban_painter.dart     # SorobanFramePainter (bingkai) + SorobanPainter (manik)
 │   │   ├── soroban_layout.dart      # Geometri, hit-test, fisika 1D, gutter kiri/kanan
-│   │   └── bead_drag_state.dart     # Posisi manik mengambang per tiang saat dipegang
+│   │   └── bead_drag_state.dart     # Posisi manik mengambang + RodTouch (deck yang dipegang)
 │   ├── practice/practice_screen.dart
 │   ├── challenge/                   # mode_select, difficulty_select, challenge, result
 │   └── settings/settings_screen.dart
@@ -100,7 +121,7 @@ Aturan arsitektur yang dipegang: `core/` tidak pernah bergantung pada `features/
 | `provider` | `^6.1.5` | DI pada `SorobanController` |
 | `shared_preferences` | `^2.5.0` | Setelan + rekor waktu |
 | `google_fonts` | `^8.2.1` | Font Outfit untuk persamaan soal |
-| `audioplayers` | `^6.1.0` | Efek suara klak manik |
+| `audioplayers` | `^6.2.0` | Efek suara klak manik (pakai `AudioPool`, bukan mode `lowLatency`) |
 | `flutter_lints` | `^5.0.0` | Lint (dev) |
 
 Aset: hanya `assets/sounds/*.wav` (5 file klak, 4 dipakai round-robin saat runtime). Tidak ada aset gambar.
@@ -147,6 +168,8 @@ flutter test
 | `test/features/soroban_widget/soroban_layout_test.dart` | 39 | Geometri, fisika dorong-tarik, threshold, gutter kiri/kanan, lantai pitch |
 | `test/widget_test.dart` | 17 | Navigasi layar, posisi tombol, layout landscape, multi-touch, interruption, toggle Klik Manik |
 
+Test klak menghitung **permintaan** suara, bukan suara itu sendiri: speaker yang benar-benar bersuara tidak bisa diamati dari unit test. Yang dipin adalah kebijakan milik kita — tidak ada suara selama jari ditekan, satu per gestur baik itu menyentuh satu tiang atau dua, tidak ada untuk gestur yang tidak mengubah apa pun, satu per gestur beruntun, dan satu per move untuk animasi hint; test widget menjalankan dua pointer sungguhan dan memastikan hanya satu permintaan.
+
 ---
 
 ## CI/CD
@@ -168,9 +191,11 @@ flutter test
 
 Rekor waktu terbaik disimpan per kombinasi `kategori_kesulitan` dan ditampilkan di layar pemilihan kesulitan.
 
+Haptic tick saat menahan manik **belum** tersedia sebagai setelan — ia selalu aktif di platform yang mendukung `HapticFeedback`.
+
 ---
 
 ## Dokumentasi & Aturan Workspace
 
 - `GEMINI.md` — aturan pengembangan workspace yang wajib dipatuhi: riset dokumentasi resmi terbaru, best practice Dart/Flutter modern, konsistensi arsitektur, dan validasi `flutter analyze` bersih + `flutter test` 100% lolos.
-- `docs/soroban_multitouch_checkpoint_final_spec.md` — spesifikasi final multi-touch & rekonsiliasi checkpoint: data model `MoveGroup`/`CheckpointPlan`/`GestureTransaction`, algoritma rekonsiliasi, matriks 11 skenario uji, dan urutan build.
+- Alur gestur, ambang drag/tap, pemisahan repaint, dan kebijakan audio tidak dijelaskan di dokumen terpisah; semuanya hidup di doc comment pada file yang mengimplementasikannya — `soroban_view.dart` (sesi pointer, ambang, glosir), `soroban_painter.dart` (sorotan & geometri manik), `sound_service.dart` (kebijakan pool), dan `soroban_controller.dart` (jam, checkpoint). Baca doc comment di sana sebelum mengubah perilaku yang sama.

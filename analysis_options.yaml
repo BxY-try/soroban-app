@@ -4,6 +4,9 @@ analyzer:
     - web/**
     - windows/**
     - android/**
+    # Code review snapshots, not part of the build: they keep the import
+    # paths of the files they were copied from, so they do not resolve here.
+    - docs/**
 include: package:flutter_lints/flutter.yaml
 
 linter:

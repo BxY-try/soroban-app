@@ -330,6 +330,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
       problem: problem,
       activeCheckpointIndex: activeCpIdx,
       fontSize: fontSize,
+      controller: controller,
     );
 
     return FittedBox(
@@ -350,6 +351,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
     required Problem problem,
     required int activeCheckpointIndex,
     required double fontSize,
+    required SorobanController controller,
   }) {
     final spans = <InlineSpan>[];
 
@@ -361,6 +363,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
         for (int d = 0; d < aStr.length; d++) {
           final isDone = _isDigitCompleted(
             problem: problem,
+            controller: controller,
             activeCheckpointIndex: activeCheckpointIndex,
             termIndex: 0,
             digitIndex: d,
@@ -384,6 +387,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
         for (int d = 0; d < bStr.length; d++) {
           final isDone = _isDigitCompleted(
             problem: problem,
+            controller: controller,
             activeCheckpointIndex: activeCheckpointIndex,
             termIndex: 1,
             digitIndex: d,
@@ -412,6 +416,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
       for (int d = 0; d < termStr.length; d++) {
         final isDone = _isDigitCompleted(
           problem: problem,
+          controller: controller,
           activeCheckpointIndex: activeCheckpointIndex,
           termIndex: t,
           digitIndex: d,
@@ -430,6 +435,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
 
   bool _isDigitCompleted({
     required Problem problem,
+    required SorobanController controller,
     required int activeCheckpointIndex,
     required int termIndex,
     required int digitIndex,
@@ -443,21 +449,12 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
 
     if (problem.category == ProblemCategory.multiplication1 ||
         problem.category == ProblemCategory.multiplication2) {
-      if (termIndex == 0) {
-        // Multiplicand digit: completed if all checkpoints for this digit have been completed
-        final hasRemaining = problem.checkpoints
-            .asMap()
-            .entries
-            .any((e) => e.value.digitIndex == digitIndex && e.key >= activeCheckpointIndex);
-        return !hasRemaining;
-      } else {
-        // Multiplier digit: completed if all checkpoints for this multiplier digit have been completed
-        final hasRemaining = problem.checkpoints
-            .asMap()
-            .entries
-            .any((e) => e.value.termIndex == digitIndex && e.key >= activeCheckpointIndex);
-        return !hasRemaining;
-      }
+      // Which contributions the board holds is the controller's call, not a
+      // position in the canonical chain: the user may have worked in any order.
+      return controller.isMultiplicationDigitCompleted(
+        termIndex: termIndex,
+        digitIndex: digitIndex,
+      );
     }
 
     // Addition & Mixed:

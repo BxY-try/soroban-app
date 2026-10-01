@@ -44,9 +44,6 @@ class DigitCheckpoint {
   /// Sequence of physical finger flick moves executing this full digit.
   final List<BeadMove> atomicMoves;
 
-  /// Human-readable label (e.g., "+20000", "+90", "-400").
-  final String label;
-
   const DigitCheckpoint({
     required this.targetValue,
     required this.previousValue,
@@ -54,12 +51,11 @@ class DigitCheckpoint {
     required this.digitIndex,
     required this.rodIndex,
     required this.atomicMoves,
-    required this.label,
   });
 
   @override
   String toString() =>
-      'DigitCheckpoint($label: $previousValue -> $targetValue, moves: ${atomicMoves.length})';
+      'DigitCheckpoint($previousValue -> $targetValue, moves: ${atomicMoves.length})';
 }
 
 /// Represents a single math problem in Practice or Challenge mode.

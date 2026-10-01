@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:soroban_app/core/engine/addition_engine.dart';
+import 'package:soroban_app/core/engine/multiplication_engine.dart';
 import 'package:soroban_app/core/engine/problem_generator.dart';
 import 'package:soroban_app/core/models/bead_move.dart';
 import 'package:soroban_app/core/models/problem.dart';
@@ -113,6 +114,42 @@ class FixedCheckpointsProblemGenerator extends ProblemGenerator {
   }
 }
 
+/// Problem generator for `multiplicand × multiplier`, built the way the app
+/// builds one: the operands as terms and the canonical chain from
+/// [MultiplicationEngine] as checkpoints. The requested category is ignored,
+/// because a multiplication is not free to be anything else.
+class FixedProductProblemGenerator extends ProblemGenerator {
+  FixedProductProblemGenerator(this.multiplicand, this.multiplier)
+      : super(random: Random(0));
+
+  final int multiplicand;
+  final int multiplier;
+
+  ProblemCategory get problemCategory => multiplier < 10
+      ? ProblemCategory.multiplication1
+      : ProblemCategory.multiplication2;
+
+  @override
+  Problem generateProblem({
+    required ProblemCategory category,
+    required Difficulty difficulty,
+    int rodCount = 7,
+  }) {
+    return Problem(
+      category: problemCategory,
+      difficulty: difficulty,
+      terms: [multiplicand, multiplier],
+      operators: const ['x'],
+      expectedResult: multiplicand * multiplier,
+      checkpoints: const MultiplicationEngine().generateCheckpoints(
+        multiplicand: multiplicand,
+        multiplier: multiplier,
+        rodCount: rodCount,
+      ),
+    );
+  }
+}
+
 Problem problemFromCheckpoints(
   List<DigitCheckpoint> checkpoints, {
   required List<int> terms,
@@ -139,6 +176,14 @@ SorobanController controllerFor(ProblemGenerator generator) {
   return controller;
 }
 
+/// Controller on `multiplicand × multiplier`, e.g. `controllerForProduct(123, 3)`.
+SorobanController controllerForProduct(int multiplicand, int multiplier) {
+  final generator = FixedProductProblemGenerator(multiplicand, multiplier);
+  final controller = SorobanController(generator: generator);
+  controller.startPracticeProblem(generator.problemCategory, Difficulty.easy);
+  return controller;
+}
+
 /// Controller on a sum of [terms], e.g. `controllerForSum([4, 5])`.
 SorobanController controllerForSum(List<int> terms) =>
     controllerFor(FixedSumProblemGenerator(terms));
@@ -152,6 +197,17 @@ void setRodValue(SorobanController controller, int rodIndex, int value) {
   if (rod.heaven != (value >= 5)) controller.tapHeavenBead(rodIndex);
   final earth = value % 5;
   if (rod.earth != earth) controller.tapEarthBead(rodIndex, earth);
+}
+
+/// Puts the whole board on [value], rod by rod, and ends the gesture: a hand
+/// that lands on a number without stopping anywhere on the way.
+void setBoardValue(SorobanController controller, int value) {
+  var remaining = value;
+  for (var rod = 0; rod < controller.state.rods.length; rod++) {
+    setRodValue(controller, rod, remaining % 10);
+    remaining ~/= 10;
+  }
+  controller.onGestureSettled();
 }
 
 /// Commits [moves] and then ends the gesture, as a physical one would.
