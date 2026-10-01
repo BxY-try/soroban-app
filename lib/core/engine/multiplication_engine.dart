@@ -26,6 +26,11 @@ class MultiplicationEngine {
   /// while the user follows it. It is not the only valid one. Progress on the
   /// board is read from [MultiplicationProgress], which accepts the
   /// contributions in any order.
+  ///
+  /// The chain has exactly one checkpoint per contribution and ends on the
+  /// product. A product that does not fit on [rodCount] rods is refused with an
+  /// [ArgumentError] by the decomposition, so a chain that stops short can never
+  /// be returned.
   List<DigitCheckpoint> generateCheckpoints({
     required int multiplicand,
     required int multiplier,
@@ -42,7 +47,12 @@ class MultiplicationEngine {
 
     for (final contribution in contributions) {
       final moves = contributionMoves(runningState, contribution);
-      if (moves.isEmpty) continue;
+      if (moves.isEmpty) {
+        // Never skipped: a checkpoint missing from the chain is a contribution
+        // the board is never asked for, and the chain would end short of the
+        // product without anything noticing.
+        throw StateError('$contribution produced no moves on $runningState');
+      }
 
       final prevState = runningState;
       runningState = additionEngine.applyMoves(runningState, moves);
@@ -68,6 +78,11 @@ class MultiplicationEngine {
   ///
   /// The tens digit of the digit product goes to the rod above first, then the
   /// units digit to the contribution's own rod, both through [AdditionEngine].
+  ///
+  /// A contribution that does not reach [state] (its top digit would land past
+  /// the last rod) is an [ArgumentError]. It used to be skipped digit by digit,
+  /// which returned moves for less than the contribution's value while the
+  /// caller carried on as if all of it had been added.
   List<BeadMove> contributionMoves(
     SorobanState state,
     MultiplicationContribution contribution,
@@ -77,11 +92,19 @@ class MultiplicationEngine {
     final pTens = contribution.partial ~/ 10;
     final pUnits = contribution.partial % 10;
 
+    final topRod = pTens > 0 ? baseRod + 1 : baseRod;
+    if (baseRod < 0 || topRod >= rodCount) {
+      throw ArgumentError(
+        '$contribution does not fit on a board of $rodCount rods '
+        '(it needs rod $topRod)',
+      );
+    }
+
     final moves = <BeadMove>[];
     var runningState = state;
 
     // 1. Add tens digit of partial product to (baseRod + 1) if > 0
-    if (pTens > 0 && (baseRod + 1) < rodCount) {
+    if (pTens > 0) {
       final tensMoves = additionEngine.calculateDigitMoves(
         runningState,
         pTens,
@@ -92,7 +115,7 @@ class MultiplicationEngine {
     }
 
     // 2. Add units digit of partial product to baseRod if > 0
-    if (pUnits > 0 && baseRod < rodCount) {
+    if (pUnits > 0) {
       final unitsMoves = additionEngine.calculateDigitMoves(
         runningState,
         pUnits,

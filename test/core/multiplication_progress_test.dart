@@ -70,14 +70,20 @@ void main() {
       expect(progress.contributions.map((c) => c.value), [20000, 60]);
     });
 
-    test('a contribution that does not fit on the board is dropped', () {
-      final progress = MultiplicationProgress(
-        multiplicand: 99,
-        multiplier: 99,
-        rodCount: 3,
+    test('a product that does not fit on the board is refused, not shortened',
+        () {
+      // 99 × 99 = 9801 needs four rods. On three it used to come back as the
+      // three contributions that happened to fit, with the rest gone and a
+      // total that was no longer the product. See multiplication_invariants_test
+      // for the whole rule.
+      expect(
+        () => MultiplicationProgress(
+          multiplicand: 99,
+          multiplier: 99,
+          rodCount: 3,
+        ),
+        throwsArgumentError,
       );
-
-      expect(progress.contributions, hasLength(3));
     });
   });
 
@@ -98,13 +104,17 @@ void main() {
       expect(MultiplicationProgress.forProblem(problem), isNull);
     });
 
-    test('checkpoints that are not the operands\' own chain are not trusted',
-        () {
+    test('checkpoints that are not the operands\' own chain are refused', () {
+      // Used to fall back to the linear chain, which would call the problem
+      // solved at 29616 (1234 × 24) while the screen says 1234 × 23.
       final foreign = const MultiplicationEngine()
           .generateCheckpoints(multiplicand: 1234, multiplier: 24);
       final problem = productProblem(1234, 23, checkpoints: foreign);
 
-      expect(MultiplicationProgress.forProblem(problem), isNull);
+      expect(
+        () => MultiplicationProgress.forProblem(problem),
+        throwsArgumentError,
+      );
     });
   });
 

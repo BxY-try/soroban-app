@@ -232,3 +232,53 @@ void performCheckpointGesture(
 ) {
   performGesture(controller, checkpoint.atomicMoves);
 }
+
+/// A multiplication problem built the way the app builds one (the operands as
+/// terms, the canonical chain as checkpoints), with any part of it replaced.
+///
+/// The overrides are how a test builds a problem that did *not* come from the
+/// generator and is wrong in one specific way: a chain that stops short, a
+/// result that is not the product, a product the board cannot hold.
+Problem multiplicationProblem(
+  int multiplicand,
+  int multiplier, {
+  List<int>? terms,
+  int? expectedResult,
+  List<DigitCheckpoint>? checkpoints,
+  int rodCount = 7,
+}) {
+  return Problem(
+    category: multiplier < 10
+        ? ProblemCategory.multiplication1
+        : ProblemCategory.multiplication2,
+    difficulty: Difficulty.easy,
+    terms: terms ?? [multiplicand, multiplier],
+    operators: const ['x'],
+    expectedResult: expectedResult ?? multiplicand * multiplier,
+    checkpoints: checkpoints ??
+        const MultiplicationEngine().generateCheckpoints(
+          multiplicand: multiplicand,
+          multiplier: multiplier,
+          rodCount: rodCount,
+        ),
+  );
+}
+
+/// Hands out the problems it was given, in order and then around again,
+/// whatever is asked. A stand-in for a generator whose rules changed, or for
+/// problems that were never made by one.
+class ScriptedProblemGenerator extends ProblemGenerator {
+  ScriptedProblemGenerator(this.problems) : super(random: Random(0));
+
+  final List<Problem> problems;
+  int _next = 0;
+
+  @override
+  Problem generateProblem({
+    required ProblemCategory category,
+    required Difficulty difficulty,
+    int rodCount = 7,
+  }) {
+    return problems[_next++ % problems.length];
+  }
+}

@@ -18,9 +18,10 @@ Berdiri di atas `ChangeNotifier` + `provider`, dengan seluruh perhitungan mekani
 | **Sinyal "yang sedang dipegang"** | Ujung jari menutupi manik yang dicengkeramnya. Sejak pointer-down, deck yang dipegang mendapat pita soft (dibatasi lebar kolom tiang agar dua tiang bersebelahan tidak menyatu jadi strip gelap) dan manik yang dicengkeram membesar sedikit dengan outline gelap, disertai satu haptic tick. |
 | **Checkpoint per digit penuh** | Setiap digit satu `DigitCheckpoint` yang menyimpan daftar `BeadMove` atomik — satu checkpoint boleh butuh banyak tiang dan banyak gestur. |
 | **Hint berantai (Chained Animation)** | Tombol hint memutar satu checkpoint penuh, manik demi manik, dengan aksen pendar kuningan (brass glow) dan suara klak. |
-| **Recovery "Nyasar"** | Kalau papan melenceng dari checkpoint terakhir, hint memulihkan tiang yang menyimpang satu per satu supaya user melihat persis tiang mana yang salah. |
-| **Replay & Retri** | Replay memutar ulang animasi digit terakhir yang di-hint; Retri mundur satu checkpoint. Keduanya **hanya di Practice mode**. |
-| **Papan bebas (Free Board)** | Papan adalah sumber kebenaran. Gestur bisa mendarat di tiang mana pun; progres hanya dibaca **saat diam** (`onGestureSettled`), lalu dicocokkan ke rantai checkpoint berdasarkan nilai. |
+| **Recovery "Nyasar"** | Kalau papan melenceng, hint memulihkan tiang yang menyimpang satu per satu supaya user melihat persis tiang mana yang salah. Untuk perkalian, pemulihan ke **board valid terakhir milik user** — bukan ke awal rantai — lalu satu langkah berikutnya ditambahkan di atasnya. |
+| **Replay & Retri** | Replay memutar ulang animasi digit terakhir yang di-hint; Retri mundur satu checkpoint (satu kontribusi untuk perkalian). Keduanya **hanya di Practice mode**. |
+| **Papan bebas (Free Board)** | Papan adalah sumber kebenaran. Gestur bisa mendarat di tiang mana pun; progres hanya dibaca **saat diam** (`onGestureSettled`), lalu dicocokkan ke rantai checkpoint berdasarkan nilai — atau, untuk perkalian, dibaca sebagai **subset hasil-kali digit** dalam urutan apa pun. |
+| **Perkalian bebas urutan** | User boleh mengerjakan `× 3` dulu baru `× 20` (urutan buku teks); setiap hasil-kali yang sudah ada di papan tetap dikreditkan, dan digit persamaan yang diredupkan mengikuti board, bukan urutan soal. |
 | **Mode Practice** | Tanpa timer, tanpa tekanan. Ganti kategori & tingkat kesulitan on-the-fly, tombol Soal Berikutnya, hint/replay/retri aktif. |
 | **Mode Tantangan** | 5 soal beruntun dengan **satu timer akumulatif** untuk seluruh sesi, plus rekor waktu terbaik per kategori × kesulitan. |
 | **Suara taktil** | 4 variasi klak kayu diputar round-robin (tanpa pengulangan beruntun) dengan jitter volume 0.80–0.88. Satu gestur = satu klak. Tiap variasi punya `AudioPool` yang sudah di-preload, jadi klak pertama sebuah sesi tidak ikut menanggung biaya salin aset, dan konteksnya `mixWithOthers` sehingga klak tidak merebut fokus audio aplikasi lain. |
@@ -33,7 +34,7 @@ Berdiri di atas `ChangeNotifier` + `provider`, dengan seluruh perhitungan mekani
 
 ## Kategori Soal & Tingkat Kesulitan
 
-Soal dibangkitkan dengan **rejection sampling** sehingga dijamin muat di 7 tiang (≤ 9,999,999) dan running total tidak pernah negatif.
+Soal dibangkitkan dengan **rejection sampling** sehingga dijamin muat di papan (7 tiang: ≤ 9,999,999) dan running total tidak pernah negatif. Untuk perkalian, aturan "muat" hanya ditulis satu kali (`MultiplicationContribution.fitsOnBoard`) dan dibaca dari `rodCount`, bukan dari konstanta; permintaan yang tidak mungkin dipenuhi berakhir dengan error, bukan loop.
 
 | Kategori | Easy | Medium | Hard |
 |---|---|---|---|
@@ -42,7 +43,7 @@ Soal dibangkitkan dengan **rejection sampling** sehingga dijamin muat di 7 tiang
 | **Perkalian I** | 3 digit × 1 digit | 4 digit × 1 digit | 5 digit × 1 digit |
 | **Perkalian II** | 4 digit × 2 digit | 5 digit × 2 digit | 5 digit × 2 digit (carry-heavy, digit 6–9) |
 
-Perkalian dipecah menjadi partial product, lalu **100% didelegasikan** move maniknya ke `AdditionEngine` — tidak ada logika manik terpisah di engine perkalian.
+Perkalian dipecah menjadi partial product, lalu **100% didelegasikan** move maniknya ke `AdditionEngine` — tidak ada logika manik terpisah di engine perkalian. Progresnya tidak dibaca sebagai rantai nilai: papan dikreditkan bila nilainya sama dengan jumlah **subset** `MultiplicationContribution` (hasil-kali satu digit faktor × satu digit pengali), dalam urutan apa pun; dua kontribusi bernilai sama (mis. `3 × 2` dan `2 × 3` sama-sama 600) diputuskan mengikuti pola yang sedang dikerjakan user.
 
 ---
 
@@ -53,6 +54,10 @@ Perkalian dipecah menjadi partial product, lalu **100% didelegasikan** move mani
 **Kawan kecil / kawan besar.** `AdditionEngine` menghitung gerakan atomik `BeadMove` untuk satu digit memakai teknik asli sempoa: gerakan langsung, komplemen 5 (kawan kecil), dan komplemen 10 (kawan besar) dengan carry/borrow — termasuk ripple beruntun lintas tiang seperti `999 + 1 = 1000`.
 
 **Rekonsiliasi di titik diam.** Progres checkpoint tidak pernah naik per-commit. Satu gestur fisik boleh melibatkan berapa pun jumlah jari, tiang, dan commit; baru saat jari terakhir terangkat `reconcileCheckpoints()` berjalan sekali. Yang diambil adalah checkpoint **pertama pada atau setelah posisi aktif** yang nilainya cocok — sehingga `12 + 7 − 7` (target `10, 12, 19, 12`) tidak salah resolve, dan user yang mendarat langsung di nilai akhir tetap dihitung sudah melewati checkpoint di antaranya.
+
+**Perkalian: invarian yang selalu benar.** (1) *Representable*: `multiplicand × multiplier ≤ 10^rodCount − 1`. (2) *Complete*: kontribusi berjumlah persis product, dan satu problem punya tepat satu checkpoint per kontribusi dengan checkpoint terakhir = product — jadi "semua kontribusi sudah di papan" dan "papan menunjukkan product" adalah satu fakta yang sama, dan soal tidak bisa dinyatakan selesai di papan yang bukan jawabannya. (3) *Identity*: kontribusi dikenali dari `index` (dan pasangan digitnya), tidak pernah dari `(nilai, tiang)`; `12 × 12` punya dua kontribusi berbeda yang sama-sama menaruh 20 di tiang 1. Pelanggaran (1)/(2) **ditolak dengan `ArgumentError`**, bukan dipotong diam-diam atau di-`assert` (assert tidak jalan di release): `decompose` menolak produk yang tidak muat, `MultiplicationProgress.forProblem` menolak problem perkalian yang tidak utuh dan dipanggil controller *sebelum* state apa pun berubah. Bila papan tidak bisa membedakan dua pembacaan (nilai kembar, atau jumlah yang kebetulan sama seperti `2400` pada `12345 × 67`), rute user yang memutuskan dan hasilnya fungsi murni dari (papan, rute); nilai papan, move Hint, dan solved-state benar untuk semua pembacaan.
+
+**Perkalian: subset kontribusi, bukan rantai.** Rantai checkpoint tetap ada (untuk jalur kanonik dan referensi replay), tetapi kredit progres perkalian dibaca dari papan: nilai board yang sama dengan jumlah subset `MultiplicationContribution` dikreditkan — dalam urutan apa pun user memilih. Kalau user mengambil-alih sebagian pekerjaan dan membangun state lain yang valid, kredit mengikuti papan, bukan riwayat. `nextContribution` membaca pola dari kontribusi terakhir (baris pengali vs kolom bilangan kali, dan arahnya), jadi hint, replay, dan dimming digit mengikuti rute milik user.
 
 **Tidak ada match = tidak ada aksi.** Papan dibiarkan persis seperti yang ditinggalkan user; memperbaiki board yang salah tetap keputusan mereka lewat Retri.
 
@@ -88,6 +93,7 @@ lib/
 │   ├── engine/                      # Kalkulasi mekanik, tanpa widget & tanpa I/O
 │   │   ├── addition_engine.dart     # Apply move, calculateDigitMoves (kawan kecil/besar)
 │   │   ├── multiplication_engine.dart# Partial product -> AdditionEngine
+│   │   ├── multiplication_progress.dart # Dekomposisi kontribusi + membaca progres dari board
 │   │   ├── problem_generator.dart   # Rejection sampling per kategori & kesulitan
 │   │   └── hint_engine.dart         # getNextHint, getReplay, deteksi divergensi
 │   ├── services/
@@ -154,13 +160,16 @@ flutter analyze   # harus 0 issue
 flutter test
 ```
 
-116 test case tersebar di 9 file test:
+218 test case tersebar di 12 file test:
 
 | File | Test | Cakupan |
 |---|---|---|
 | `test/core/addition_engine_test.dart` | 8 | Model `Rod`/`SorobanState`, gerakan langsung, kawan kecil, kawan besar, ripple carry, peminjaman |
-| `test/core/multiplication_engine_test.dart` | 2 | Perkalian 1-digit & 2-digit via partial product |
-| `test/core/problem_generator_test.dart` | 5 | Konvensi digit/suku, batas 7 tiang, running total anti-negatif |
+| `test/core/multiplication_engine_test.dart` | 12 | Perkalian 1-digit & 2-digit, rantai pengajaran kanonik, produk yang persis memenuhi papan vs ditolak bila tidak muat, `contributionMoves` dari board apa pun dan penolakan kontribusi yang tidak sampai ke papan, dua kontribusi kembar menghasilkan move identik |
+| `test/core/multiplication_progress_test.dart` | 19 | Dekomposisi kontribusi, `forProblem`, `explain`/`ordered`/`nextContribution` untuk semua subset & arah |
+| `test/core/multiplication_progression_test.dart` | 41 | E2E controller: route kanonik/buku teks/campuran/kolom, hint mengikuti rute user, retri & replay per-kontribusi, dimming digit, `12 × 12` (dua kontribusi kembar), solved-state hanya di product, penolakan problem di luar generator tanpa mengubah state |
+| `test/core/multiplication_invariants_test.dart` | 28 | Invarian perkalian: batas kapasitas tepat & satu tiang kurang, sifat menyeluruh `decompose` (jumlah = product atau ditolak) untuk semua `rodCount` 1–6, problem buatan luar generator, solved ⇔ papan = product, identitas kontribusi kembar, konvergensi Hint dari setiap board (termasuk board ambigu) |
+| `test/core/problem_generator_test.dart` | 9 | Konvensi digit/suku, batas 7 tiang, running total anti-negatif, perkalian selalu lolos `forProblem`, `rodCount` dihormati, reject-and-retry, permintaan mustahil → `StateError` |
 | `test/core/hint_engine_test.dart` | 3 | Pemilihan checkpoint, rollback replay, recovery divergensi |
 | `test/core/soroban_controller_test.dart` | 17 | Gestur manual, checkpoint, reset/retry, setelan, timer |
 | `test/core/checkpoint_progression_test.dart` | 22 | Papan bebas, rekonsiliasi di titik diam, skip checkpoint, target berulang, rantai snapshot tanpa lubang |

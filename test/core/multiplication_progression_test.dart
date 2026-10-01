@@ -1,4 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:soroban_app/core/engine/multiplication_engine.dart';
+import 'package:soroban_app/core/models/problem.dart';
 import 'package:soroban_app/core/state/soroban_controller.dart';
 
 import '../helpers/fixed_problem.dart';
@@ -392,6 +394,228 @@ void main() {
 
       setBoardValue(controller, 12345 * 67);
       expect(controller.activeCheckpointIndex, equals(10));
+    });
+  });
+
+  group('12 × 12: two contributions that look the same on the board', () {
+    test('the canonical chain is 100 → 120 → 140 → 144', () {
+      final controller = controllerForProduct(12, 12);
+
+      expect(
+        controller.currentProblem!.checkpoints.map((c) => c.targetValue),
+        [100, 120, 140, 144],
+      );
+    });
+
+    test('canonical order credits one contribution per gesture, and is solved '
+        'only after the last', () {
+      final controller = controllerForProduct(12, 12);
+      final checkpoints = controller.currentProblem!.checkpoints;
+
+      for (var i = 0; i < checkpoints.length; i++) {
+        performCheckpointGesture(controller, checkpoints[i]);
+
+        expect(controller.activeCheckpointIndex, equals(i + 1));
+        expect(controller.creditedContributions,
+            equals([for (var k = 0; k <= i; k++) k]));
+        expect(controller.isMultiplicationSolved,
+            equals(i == checkpoints.length - 1),
+            reason: 'after checkpoint $i');
+        expectChainIntact(controller);
+      }
+    });
+
+    test('one 20, then the other 20: two contributions, one at a time', () {
+      final controller = controllerForProduct(12, 12);
+
+      setBoardValue(controller, 20);
+      expect(controller.creditedContributions, equals([1]));
+      expect(controller.activeCheckpointIndex, equals(1));
+      expectChainIntact(controller);
+
+      setBoardValue(controller, 40);
+      expect(controller.creditedContributions, equals([1, 2]));
+      expect(controller.activeCheckpointIndex, equals(2));
+      expect(controller.isMultiplicationSolved, isFalse);
+      expectChainIntact(controller);
+    });
+
+    test('both 20s in one jump are credited as two, because nothing else adds '
+        'up to 40', () {
+      final controller = controllerForProduct(12, 12);
+
+      setBoardValue(controller, 40);
+
+      expect(controller.creditedContributions, unorderedEquals([1, 2]));
+      expect(controller.activeCheckpointIndex, equals(2));
+      expectChainIntact(controller);
+    });
+
+    test('the same board, 24, is read by the route that led to it', () {
+      final fromTheUnits = controllerForProduct(12, 12);
+      setBoardValue(fromTheUnits, 4);
+      setBoardValue(fromTheUnits, 24);
+
+      final fromTheTens = controllerForProduct(12, 12);
+      setBoardValue(fromTheTens, 20);
+      setBoardValue(fromTheTens, 24);
+
+      // Same board, same count, same work left. Only which 20 is credited
+      // differs, and so which digit of the equation is dimmed.
+      for (final controller in [fromTheUnits, fromTheTens]) {
+        expect(controller.state.value, equals(24));
+        expect(controller.activeCheckpointIndex, equals(2));
+        expect(controller.isMultiplicationSolved, isFalse);
+        expectChainIntact(controller);
+      }
+
+      // 4 then 20: row by row, 12 × 2 = 24. The multiplier's 2 is done.
+      expect(fromTheUnits.creditedContributions, equals([3, 2]));
+      expect(
+        fromTheUnits.isMultiplicationDigitCompleted(
+            termIndex: 1, digitIndex: 1),
+        isTrue,
+      );
+      expect(
+        fromTheUnits.isMultiplicationDigitCompleted(
+            termIndex: 0, digitIndex: 1),
+        isFalse,
+      );
+
+      // 20 then 4: column by column, 2 × 12 = 24. The multiplicand's 2 is done.
+      expect(fromTheTens.creditedContributions, equals([1, 3]));
+      expect(
+        fromTheTens.isMultiplicationDigitCompleted(
+            termIndex: 0, digitIndex: 1),
+        isTrue,
+      );
+      expect(
+        fromTheTens.isMultiplicationDigitCompleted(
+            termIndex: 1, digitIndex: 1),
+        isFalse,
+      );
+    });
+
+    test('Hint on a lone 20 continues the row, and never credits a twin twice',
+        () async {
+      final controller = controllerForProduct(12, 12);
+      setBoardValue(controller, 20);
+      expect(controller.creditedContributions, equals([1]));
+
+      await controller.executeHint();
+
+      // 1 × 1 at rod 2, the rest of the row the 20 belongs to.
+      expect(controller.state.value, equals(120));
+      expect(controller.creditedContributions, equals([1, 0]));
+      expect(controller.activeCheckpointIndex, equals(2));
+      expect(controller.isMultiplicationSolved, isFalse);
+      expectChainIntact(controller);
+    });
+  });
+
+  group('Solved means the board shows the product', () {
+    // Every value a 12 × 12 board can legitimately hold: sums of 100, 20, 20, 4.
+    const accumulations = [0, 4, 20, 24, 40, 44, 100, 104, 120, 124, 140, 144];
+
+    test('only the product is solved, whatever else the board holds', () {
+      for (final board in [...accumulations, 1, 21, 143, 145, 9999999]) {
+        final controller = controllerForProduct(12, 12);
+
+        setBoardValue(controller, board);
+
+        expect(controller.state.value, equals(board));
+        expect(controller.isMultiplicationSolved, equals(board == 144),
+            reason: 'board $board');
+      }
+    });
+
+    test('leaving the product un-solves it, and coming back solves it again',
+        () {
+      final controller = controllerForProduct(12, 12);
+      setBoardValue(controller, 144);
+      expect(controller.isMultiplicationSolved, isTrue);
+
+      setBoardValue(controller, 140);
+      expect(controller.isMultiplicationSolved, isFalse,
+          reason: 'the credit still counts four, the board no longer says 144');
+
+      setBoardValue(controller, 144);
+      expect(controller.isMultiplicationSolved, isTrue);
+    });
+
+    test('a problem that is not a multiplication is never "multiplication '
+        'solved"', () {
+      final controller = controllerForSum([4, 10]);
+
+      setBoardValue(controller, 14);
+
+      expect(controller.isMultiplicationSolved, isFalse);
+    });
+  });
+
+  group('A problem the board cannot play is refused before anything changes',
+      () {
+    final chain = const MultiplicationEngine()
+        .generateCheckpoints(multiplicand: 1234, multiplier: 23);
+    final good = multiplicationProblem(1234, 23);
+
+    final refused = <String, Problem>{
+      'a chain that stops short of the product': multiplicationProblem(
+        1234,
+        23,
+        checkpoints: chain.sublist(0, chain.length - 1),
+      ),
+      'an expected result that is not the product':
+          multiplicationProblem(1234, 23, expectedResult: 28383),
+      'a product that does not fit the board': multiplicationProblem(
+        99999,
+        999,
+        checkpoints: const MultiplicationEngine()
+            .generateCheckpoints(multiplicand: 99999, multiplier: 99),
+      ),
+    };
+
+    for (final entry in refused.entries) {
+      test('${entry.key}: the previous problem stays exactly as it was', () {
+        final controller = SorobanController(
+          generator: ScriptedProblemGenerator([good, entry.value]),
+        );
+        controller.startPracticeProblem(
+            ProblemCategory.multiplication2, Difficulty.easy);
+        setBoardValue(controller, 3702);
+        final credited = controller.creditedContributions;
+
+        expect(
+          () => controller.startPracticeProblem(
+              ProblemCategory.multiplication2, Difficulty.easy),
+          throwsArgumentError,
+        );
+
+        expect(controller.currentProblem, same(good));
+        expect(controller.state.value, equals(3702));
+        expect(controller.creditedContributions, equals(credited));
+        expect(controller.activeCheckpointIndex, equals(4));
+        expect(controller.isMultiplicationSolved, isFalse);
+        expectChainIntact(controller);
+      });
+    }
+
+    test('a bad problem anywhere in a challenge session refuses the whole '
+        'session, before it starts', () {
+      final bad = multiplicationProblem(1234, 23, expectedResult: 28383);
+      final controller = SorobanController(
+        generator: ScriptedProblemGenerator([good, good, bad, good, good]),
+      );
+
+      expect(
+        () => controller.startChallengeSession(
+            ProblemCategory.multiplication2, Difficulty.easy),
+        throwsArgumentError,
+      );
+
+      expect(controller.isChallengeMode, isFalse);
+      expect(controller.totalChallengeProblems, equals(0));
+      expect(controller.currentProblem, isNull);
     });
   });
 

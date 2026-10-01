@@ -93,6 +93,25 @@ class SorobanController extends ChangeNotifier {
     );
   }
 
+  /// Whether the current multiplication is solved: every contribution is
+  /// credited *and* the board shows the product.
+  ///
+  /// The credit alone would be enough if it could never drift from the board,
+  /// and it is built so that it cannot. The board is checked as well because
+  /// "solved" is the one conclusion that must never be wrong, and it costs one
+  /// comparison to read it from the thing the user actually sees.
+  bool _isMultiplicationSolved(MultiplicationProgress multiplication) =>
+      _creditedContributions.length >= multiplication.contributions.length &&
+      _state.value == multiplication.total;
+
+  /// Whether the current problem is a multiplication that is solved right now.
+  /// Exposed for tests: in Practice mode nothing else observes it.
+  @visibleForTesting
+  bool get isMultiplicationSolved {
+    final multiplication = _multiplication;
+    return multiplication != null && _isMultiplicationSolved(multiplication);
+  }
+
   bool _isChallengeMode = false;
   bool get isChallengeMode => _isChallengeMode;
 
@@ -231,6 +250,16 @@ class SorobanController extends ChangeNotifier {
 
   // --- Setup Modes ---
   void startPracticeProblem(ProblemCategory category, Difficulty difficulty) {
+    final problem = problemGenerator.generateProblem(
+      category: category,
+      difficulty: difficulty,
+      rodCount: _state.rods.length,
+    );
+    // A problem this board cannot play is refused here, before anything has
+    // changed: the previous problem stays exactly as it was and the error
+    // reaches the caller. See [_progressFor].
+    _progressFor(problem);
+
     _isChallengeMode = false;
     _isChallengeCompleted = false;
     _stopwatch.reset();
@@ -239,22 +268,28 @@ class SorobanController extends ChangeNotifier {
     _elapsedMilliseconds = 0;
     _elapsedSeconds.value = 0;
 
-    _currentProblem = problemGenerator.generateProblem(
-      category: category,
-      difficulty: difficulty,
-    );
+    _currentProblem = problem;
     _resetToNewProblem();
   }
 
   void startChallengeSession(ProblemCategory category, Difficulty difficulty) {
+    final problems = problemGenerator.generateChallengeSession(
+      category: category,
+      difficulty: difficulty,
+      rodCount: _state.rods.length,
+      count: 5,
+    );
+    // All of them, now. The later ones are only reached after a delay, from a
+    // timer callback with nobody to catch an error, so a bad one must not be
+    // allowed to wait for its turn. Nothing has started yet: no clock, no state.
+    for (final problem in problems) {
+      _progressFor(problem);
+    }
+
     _isChallengeMode = true;
     _isChallengeCompleted = false;
     _challengeIndex = 0;
-    _challengeProblems = problemGenerator.generateChallengeSession(
-      category: category,
-      difficulty: difficulty,
-      count: 5,
-    );
+    _challengeProblems = problems;
 
     _stopwatch.reset();
     _stopwatch.start();
@@ -283,14 +318,22 @@ class SorobanController extends ChangeNotifier {
     _creditedContributions = <int>[];
     _lastMultiplicationHint = null;
     final problem = _currentProblem;
-    _multiplication = problem == null
-        ? null
-        : MultiplicationProgress.forProblem(
-            problem,
-            rodCount: _state.rods.length,
-          );
+    _multiplication = problem == null ? null : _progressFor(problem);
     notifyListeners();
   }
+
+  /// The multiplication model of [problem] on this board: null for a problem
+  /// that is not a multiplication, and an [ArgumentError] for a multiplication
+  /// that is not playable (its product does not fit on the board, or its
+  /// checkpoints are not the chain of its own operands; see
+  /// [MultiplicationProgress.forProblem]).
+  ///
+  /// This is the one gate a problem passes before it can become
+  /// [currentProblem]. Behind it, "every contribution is credited", "the board
+  /// shows the product" and "the chain is complete" are the same fact, so a
+  /// problem can never be reported solved at a board that is not its answer.
+  MultiplicationProgress? _progressFor(Problem problem) =>
+      MultiplicationProgress.forProblem(problem, rodCount: _state.rods.length);
 
   // --- Manual Bead Gestures ---
   //
@@ -498,7 +541,7 @@ class SorobanController extends ChangeNotifier {
     _creditContributions(
       multiplication.ordered(_creditedContributions, explained),
     );
-    if (_creditedContributions.length >= total) {
+    if (_isMultiplicationSolved(multiplication)) {
       _handleProblemCompleted();
     }
     notifyListeners();
@@ -729,7 +772,7 @@ class SorobanController extends ChangeNotifier {
     _animatingBeadKey = null;
     _isAnimating = false;
 
-    if (_creditedContributions.length >= multiplication.contributions.length) {
+    if (_isMultiplicationSolved(multiplication)) {
       _handleProblemCompleted();
     }
 
@@ -767,7 +810,7 @@ class SorobanController extends ChangeNotifier {
     _animatingBeadKey = null;
     _isAnimating = false;
 
-    if (_creditedContributions.length >= multiplication.contributions.length) {
+    if (_isMultiplicationSolved(multiplication)) {
       _handleProblemCompleted();
     }
 

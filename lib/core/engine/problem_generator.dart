@@ -3,6 +3,7 @@ import '../models/problem.dart';
 import '../models/soroban_state.dart';
 import 'addition_engine.dart';
 import 'multiplication_engine.dart';
+import 'multiplication_progress.dart';
 
 /// Generates math problems for Practice and Challenge sessions using Rejection Sampling.
 /// Guarantees that:
@@ -10,6 +11,12 @@ import 'multiplication_engine.dart';
 /// - Intermediate running totals never drop below 0 (non-negative constraint)
 /// - Digits and terms strictly conform to the spec in §3
 class ProblemGenerator {
+  /// How many candidates a multiplication problem may be drawn before the
+  /// request is declared impossible. With 7 rods nothing is ever rejected; the
+  /// bound is there so that a smaller board (or bigger operands) ends in an
+  /// error instead of a loop that never returns.
+  static const int _maxMultiplicationAttempts = 1000;
+
   final Random _random;
   final AdditionEngine additionEngine;
   final MultiplicationEngine multiplicationEngine;
@@ -227,13 +234,21 @@ class ProblemGenerator {
       Difficulty.hard => 5,
     };
 
-    while (true) {
+    for (var attempt = 0; attempt < _maxMultiplicationAttempts; attempt++) {
       final a = _randomNDigits(aDigits);
       // Multiplier is 1 digit (2..9)
       final b = 2 + _random.nextInt(8);
       final product = a * b;
 
-      if (product > 9999999) continue;
+      // A sampling filter, not the guard: the board's capacity is decided by
+      // one rule that the decomposition enforces too (and throws on).
+      if (!MultiplicationContribution.fitsOnBoard(
+        multiplicand: a,
+        multiplier: b,
+        rodCount: rodCount,
+      )) {
+        continue;
+      }
 
       final checkpoints = multiplicationEngine.generateCheckpoints(
         multiplicand: a,
@@ -250,6 +265,9 @@ class ProblemGenerator {
         checkpoints: checkpoints,
       );
     }
+    throw StateError(
+      'no $aDigits-digit × 1-digit multiplication fits on $rodCount rods',
+    );
   }
 
   // --- Multiplication II: 2-digit multiplier ---
@@ -263,7 +281,7 @@ class ProblemGenerator {
       Difficulty.hard => 5,
     };
 
-    while (true) {
+    for (var attempt = 0; attempt < _maxMultiplicationAttempts; attempt++) {
       int a;
       int b;
 
@@ -277,7 +295,13 @@ class ProblemGenerator {
       }
 
       final product = a * b;
-      if (product > 9999999) continue;
+      if (!MultiplicationContribution.fitsOnBoard(
+        multiplicand: a,
+        multiplier: b,
+        rodCount: rodCount,
+      )) {
+        continue;
+      }
 
       final checkpoints = multiplicationEngine.generateCheckpoints(
         multiplicand: a,
@@ -294,6 +318,9 @@ class ProblemGenerator {
         checkpoints: checkpoints,
       );
     }
+    throw StateError(
+      'no $aDigits-digit × 2-digit multiplication fits on $rodCount rods',
+    );
   }
 
   int _randomNDigits(int n) {

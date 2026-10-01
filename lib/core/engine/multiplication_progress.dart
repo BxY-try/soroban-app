@@ -8,6 +8,35 @@ int _pow10(int exponent) {
   return result;
 }
 
+/// The most rods the arithmetic below is exact for. `10^15 - 1` is the largest
+/// all-nines value a JavaScript number holds exactly (the app also targets the
+/// web), and a product that fits on the board then fits in an `int` everywhere.
+const int _maxRodCount = 15;
+
+/// The largest value a board of [rodCount] rods can show: 9, 99, 999, ...
+///
+/// The one place a rod count is turned into a capacity, and the one place a
+/// nonsensical rod count is refused.
+int _capacity(int rodCount) {
+  if (rodCount < 1 || rodCount > _maxRodCount) {
+    throw ArgumentError.value(
+      rodCount,
+      'rodCount',
+      'must be between 1 and $_maxRodCount',
+    );
+  }
+  return _pow10(rodCount) - 1;
+}
+
+/// Refuses [problem] as a multiplication. Plain message on purpose: a
+/// malformed problem may not even have a printable equation.
+Never _rejectProblem(Problem problem, String reason) {
+  throw ArgumentError(
+    'not a playable multiplication (terms ${problem.terms}, expected '
+    '${problem.expectedResult}): $reason',
+  );
+}
+
 int _multiplicandIndexOf(MultiplicationContribution c) => c.multiplicandIndex;
 int _multiplierIndexOf(MultiplicationContribution c) => c.multiplierIndex;
 
@@ -31,6 +60,12 @@ class MultiplicationContribution {
 
   /// Position in the canonical teaching order (see [decompose]). Also the
   /// identity of the contribution everywhere else.
+  ///
+  /// Two contributions can have the same value on the same rod (`12 × 12` has
+  /// `2 × 1` and `1 × 2`, both 20 on rod 1) and are still two contributions:
+  /// the product needs both, and they are told apart by this index and by their
+  /// digit positions, never by `(value, rodIndex)`. Merging them would make the
+  /// board expect fewer contributions than the user has to execute.
   final int index;
 
   /// Position of the multiplicand digit (0 = leftmost).
@@ -52,21 +87,69 @@ class MultiplicationContribution {
   /// What this contribution adds to the board.
   int get value => partial * _pow10(rodIndex);
 
+  /// Whether `multiplicand × multiplier` can be shown on a board of [rodCount]
+  /// rods, which is to say whether it is at most `10^rodCount - 1`. False for a
+  /// negative operand.
+  ///
+  /// This is the whole representability rule and the only place it is written
+  /// down: [decompose], [MultiplicationProgress.forProblem] and the problem
+  /// generator all ask it, so they cannot disagree.
+  ///
+  /// It is a statement about the *product*, not about each contribution. A
+  /// contribution is never larger than the product, so a product that fits
+  /// takes every contribution with it; and the contributions add up to the
+  /// product, so one that does not fit cannot be held by the board however the
+  /// pieces are cut. Looking at the contributions one by one (what [decompose]
+  /// used to do) is therefore not enough: `3 × 34` on two rods has no
+  /// contribution that sticks out, yet it needs a board that shows 102 and
+  /// this one stops at 99.
+  static bool fitsOnBoard({
+    required int multiplicand,
+    required int multiplier,
+    int rodCount = 7,
+  }) {
+    final capacity = _capacity(rodCount);
+    if (multiplicand < 0 || multiplier < 0) return false;
+    if (multiplicand == 0 || multiplier == 0) return true;
+    // `a × b <= capacity` written as `a <= capacity ~/ b`: the same answer for
+    // positive integers, and it cannot overflow.
+    return multiplicand <= capacity ~/ multiplier;
+  }
+
   /// Splits `multiplicand × multiplier` into contributions, in the canonical
   /// teaching order: multiplier digits left to right and, within each, the
   /// multiplicand digits left to right. Digit products of zero add nothing and
-  /// are left out, as is anything that would not fit on [rodCount] rods.
+  /// are left out; nothing else is.
   ///
-  /// Both operands must be non-negative.
+  /// The contributions therefore always add up to exactly the product. When
+  /// that cannot be so, because a negative operand or because the product does
+  /// not fit on [rodCount] rods ([fitsOnBoard]), this throws an
+  /// [ArgumentError] instead of returning part of the answer: a decomposition
+  /// that silently left something out would still look consistent, and
+  /// everything built on it (checkpoints, Hint, "solved") would agree on the
+  /// wrong product. Thrown, not asserted, because assertions are ignored in
+  /// release builds.
   static List<MultiplicationContribution> decompose({
     required int multiplicand,
     required int multiplier,
     int rodCount = 7,
   }) {
-    assert(
-      multiplicand >= 0 && multiplier >= 0,
-      'operands must not be negative',
-    );
+    if (multiplicand < 0 || multiplier < 0) {
+      throw ArgumentError(
+        'operands must not be negative: $multiplicand × $multiplier',
+      );
+    }
+    if (!fitsOnBoard(
+      multiplicand: multiplicand,
+      multiplier: multiplier,
+      rodCount: rodCount,
+    )) {
+      throw ArgumentError(
+        '$multiplicand × $multiplier does not fit on $rodCount rods '
+        '(the board tops out at ${_capacity(rodCount)})',
+      );
+    }
+
     final a = multiplicand.toString();
     final b = multiplier.toString();
     final contributions = <MultiplicationContribution>[];
@@ -80,17 +163,13 @@ class MultiplicationContribution {
         final partial = multiplicandDigit * multiplierDigit;
         if (partial == 0) continue;
 
-        final rodIndex = (a.length - 1 - i) + multiplierExponent;
-        final topRod = partial >= 10 ? rodIndex + 1 : rodIndex;
-        if (topRod >= rodCount) continue;
-
         contributions.add(MultiplicationContribution(
           index: contributions.length,
           multiplicandIndex: i,
           multiplierIndex: j,
           multiplicandDigit: multiplicandDigit,
           multiplierDigit: multiplierDigit,
-          rodIndex: rodIndex,
+          rodIndex: (a.length - 1 - i) + multiplierExponent,
         ));
       }
     }
@@ -119,9 +198,18 @@ class MultiplicationContribution {
 ///
 /// Pure Dart with no Flutter and no bead mechanics: turning a contribution into
 /// finger movements is `MultiplicationEngine.contributionMoves`.
+///
+/// What this class can rely on, because it cannot be built without it:
+///
+///  * the product fits on the board ([MultiplicationContribution.fitsOnBoard]);
+///  * the contributions add up to exactly the product ([total]).
+///
+/// So "every contribution is on the board" and "the board shows the product"
+/// are the same statement, which is what makes solved-state trustworthy.
 class MultiplicationProgress {
   /// Contributions of `multiplicand × multiplier`, see
-  /// [MultiplicationContribution.decompose].
+  /// [MultiplicationContribution.decompose]. Throws an [ArgumentError] when the
+  /// product does not fit on [rodCount] rods.
   MultiplicationProgress({
     required int multiplicand,
     required int multiplier,
@@ -136,33 +224,76 @@ class MultiplicationProgress {
       : _rows = _groupIndices(contributions, _multiplierIndexOf),
         _columns = _groupIndices(contributions, _multiplicandIndexOf);
 
-  /// The progress model of [problem], or null when [problem] is not one this
-  /// class can speak for.
+  /// The progress model of [problem]: null for a problem that is not a
+  /// multiplication, a verified model for one that is, and an [ArgumentError]
+  /// for one that claims to be a multiplication and is not a playable one.
   ///
-  /// That is the case for anything but a two-operand multiplication, and also
-  /// for a multiplication whose checkpoint chain is not the canonical chain of
-  /// its own operands: the checkpoints then describe some other board sequence
-  /// and the operands cannot be trusted to explain them. Callers fall back to
-  /// the linear chain, as they always did.
+  /// There is deliberately no third answer. A multiplication that cannot be
+  /// explained used to fall back to the linear chain, which trusts the
+  /// problem's own checkpoints: a chain that stops short of the product (or is
+  /// someone else's) would then be "solved" at a board that is not the answer.
+  /// So a multiplication is refused here, once, at the boundary where problems
+  /// enter, and nothing downstream has to wonder.
+  ///
+  /// Playable means, for [rodCount] rods:
+  ///
+  ///  * two positive operands whose product fits on the board;
+  ///  * `expectedResult` is that product;
+  ///  * the contributions add up to it;
+  ///  * the checkpoints are the canonical chain of those very operands, one per
+  ///    contribution, each target the running sum.
+  ///
+  /// The last one is why the final checkpoint, `expectedResult`, the product
+  /// and the board a solved problem shows are all the same number.
   static MultiplicationProgress? forProblem(Problem problem, {int rodCount = 7}) {
     final isMultiplication =
         problem.category == ProblemCategory.multiplication1 ||
             problem.category == ProblemCategory.multiplication2;
-    if (!isMultiplication || problem.terms.length != 2) return null;
+    if (!isMultiplication) return null;
 
+    if (problem.terms.length != 2) {
+      _rejectProblem(problem, 'a multiplication has exactly two operands');
+    }
     final multiplicand = problem.terms[0];
     final multiplier = problem.terms[1];
-    if (multiplicand <= 0 || multiplier <= 0) return null;
+    if (multiplicand <= 0 || multiplier <= 0) {
+      _rejectProblem(problem, 'both operands must be positive');
+    }
+    // Before the product is computed, not after: two huge operands multiply
+    // into an `int` that wraps around without a sound, and the comparison
+    // below would then be made against a number that is not the product.
+    if (!MultiplicationContribution.fitsOnBoard(
+      multiplicand: multiplicand,
+      multiplier: multiplier,
+      rodCount: rodCount,
+    )) {
+      _rejectProblem(problem, 'the product does not fit on $rodCount rods');
+    }
+
+    final product = multiplicand * multiplier;
+    if (problem.expectedResult != product) {
+      _rejectProblem(problem, 'expectedResult must be the product, $product');
+    }
 
     final progress = MultiplicationProgress(
       multiplicand: multiplicand,
       multiplier: multiplier,
       rodCount: rodCount,
     );
+    if (progress.total != product) {
+      _rejectProblem(
+        problem,
+        'its contributions add up to ${progress.total}, not $product',
+      );
+    }
+
     final checkpoints = problem.checkpoints;
-    if (progress.contributions.isEmpty ||
-        checkpoints.length != progress.contributions.length) {
-      return null;
+    if (checkpoints.length != progress.contributions.length) {
+      _rejectProblem(
+        problem,
+        '${checkpoints.length} checkpoints for '
+        '${progress.contributions.length} contributions',
+      );
     }
 
     // Each canonical checkpoint adds exactly one contribution, so its target is
@@ -170,7 +301,13 @@ class MultiplicationProgress {
     var running = 0;
     for (var k = 0; k < checkpoints.length; k++) {
       running += progress.contributions[k].value;
-      if (checkpoints[k].targetValue != running) return null;
+      if (checkpoints[k].targetValue != running) {
+        _rejectProblem(
+          problem,
+          'checkpoint $k targets ${checkpoints[k].targetValue}, '
+          'the canonical chain reaches $running',
+        );
+      }
     }
     return progress;
   }
@@ -205,10 +342,17 @@ class MultiplicationProgress {
   /// [preferred].
   ///
   /// Several contributions can share a value (`3 × 2` and `2 × 3` both put 6 on
-  /// rod 2), and then the board cannot say which one the user meant. Ties are
-  /// broken toward the user's own pattern: the contribution
-  /// [nextContribution] expects, then whole multiplier rows and multiplicand
-  /// columns, then fewer contributions.
+  /// rod 2), and then the board cannot say which one the user meant. That is
+  /// not a defect to repair: the board is the only truth there is, and both
+  /// explanations are correct about everything the board can show (value,
+  /// count, what is left to do). They differ only in which digit is dimmed and
+  /// which contribution Hint suggests next, so the choice just has to be sound
+  /// and, above all, stable. Ties are broken toward the user's own pattern: the
+  /// contribution [nextContribution] expects, then whole multiplier rows and
+  /// multiplicand columns, then fewer contributions, and finally the one whose
+  /// contributions come first in the canonical teaching order. That last step
+  /// makes the answer a function of the inputs alone, not of the order in which
+  /// the search happens to stumble on the candidates.
   Set<int>? explain(int boardValue, {Iterable<int> preferred = const <int>[]}) {
     if (boardValue < 0) return null;
 
@@ -407,12 +551,17 @@ class MultiplicationProgress {
     List<int>? bestScore;
     for (final candidate in found) {
       final whole = <int>{...base, ...candidate};
+      final ascending = [...candidate]..sort();
       final score = [
         whole.where(credited.contains).length,
         expected != null && whole.contains(expected.index) ? 1 : 0,
         _rows.where((row) => row.every(whole.contains)).length,
         _columns.where((column) => column.every(whole.contains)).length,
         -whole.length,
+        // Last resort: the candidate that comes first in canonical order wins
+        // (earlier indices score higher). Two candidates only get here when
+        // they have the same size, so these tails are the same length.
+        for (final k in ascending) -k,
       ];
       if (bestScore == null || _compareScores(score, bestScore) > 0) {
         best = candidate;
@@ -423,7 +572,8 @@ class MultiplicationProgress {
   }
 
   static int _compareScores(List<int> a, List<int> b) {
-    for (var i = 0; i < a.length; i++) {
+    final shared = a.length < b.length ? a.length : b.length;
+    for (var i = 0; i < shared; i++) {
       final byKey = a[i].compareTo(b[i]);
       if (byKey != 0) return byKey;
     }
