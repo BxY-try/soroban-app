@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/problem.dart';
 import '../../core/state/soroban_controller.dart';
 import '../../shared/theme.dart';
+import '../../shared/time_format.dart';
 import 'challenge_screen.dart';
 
 /// Screen allowing the user to select the difficulty level (Easy, Medium, Hard).
@@ -152,7 +153,7 @@ class DifficultySelectScreen extends StatelessWidget {
                     const SizedBox(width: 6),
                     Text(
                       bestTimeMs != null
-                          ? 'Rekor: ${_formatTime(bestTimeMs)}'
+                          ? 'Rekor: ${formatTimeMs(bestTimeMs)}'
                           : 'Belum ada rekor',
                       style: const TextStyle(
                         fontSize: 12,
@@ -222,10 +223,4 @@ class DifficultySelectScreen extends StatelessWidget {
     };
   }
 
-  String _formatTime(int ms) {
-    final totalSeconds = ms ~/ 1000;
-    final minutes = totalSeconds ~/ 60;
-    final seconds = totalSeconds % 60;
-    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
-  }
 }

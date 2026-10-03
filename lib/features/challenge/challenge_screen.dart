@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/models/problem.dart';
 import '../../core/state/soroban_controller.dart';
 import '../../shared/theme.dart';
+import '../../shared/time_format.dart';
 import '../settings/settings_screen.dart';
 import '../soroban_widget/soroban_layout.dart';
 import '../soroban_widget/soroban_view.dart';
@@ -63,6 +64,45 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
   /// Margin kept between the problem text and the right screen edge.
   static const double _problemTextRightInset = 10.0;
 
+  /// The session this screen navigates on, held by the completion listener so
+  /// it can run without a [context] lookup on every notification.
+  late final SorobanController _controller;
+
+  /// The result transition happens once: the best-time write settles after it
+  /// and notifies the controller again, which must not push a second result
+  /// screen.
+  bool _resultNavigated = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = context.read<SorobanController>();
+    _controller.addListener(_onSessionChanged);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onSessionChanged);
+    super.dispose();
+  }
+
+  /// Navigates to the result screen the moment the controller reports a
+  /// finished session.
+  ///
+  /// Lives here instead of [build] on purpose: [build] must stay free of side
+  /// effects (it runs every frame the controller notifies), and a one-shot
+  /// transition must not re-arm itself on those later notifications.
+  void _onSessionChanged() {
+    if (_resultNavigated) return;
+    if (!_controller.isChallengeMode || !_controller.isChallengeCompleted) {
+      return;
+    }
+    _resultNavigated = true;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const ResultScreen()),
+    );
+  }
+
   /// Horizontal geometry of the painted Soroban for a content area
   /// [contentWidth] px wide.
   ///
@@ -114,15 +154,6 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
   Widget build(BuildContext context) {
     final controller = context.watch<SorobanController>();
 
-    // If challenge just completed, push ResultScreen
-    if (controller.isChallengeMode && controller.isChallengeCompleted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const ResultScreen()),
-        );
-      });
-    }
-
     return PopScope(
       canPop: !controller.isChallengeMode || controller.isChallengeCompleted,
       onPopInvokedWithResult: (didPop, result) {
@@ -131,61 +162,71 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
       },
       child: Scaffold(
         backgroundColor: SorobanTheme.backgroundColor,
-        body: SafeArea(
-          child: Column(
-            children: [
-              // Top Row: Back button (matching SettingsScreen exact position), Problem Text (aligned with Soroban), Settings button
-              _buildTopRow(context, controller),
+        body: GestureDetector(
+          // While the split card is up, tapping anywhere on the screen
+          // dismisses it and moves on to the next problem.
+          behavior: HitTestBehavior.opaque,
+          onTap: controller.isShowingSplitOverlay
+              ? () => controller.dismissSplitOverlay()
+              : null,
+          child: SafeArea(
+            child: Column(
+              children: [
+                // Top Row: Back button (matching SettingsScreen exact position), Problem Text (aligned with Soroban), Settings button
+                _buildTopRow(context, controller),
 
-              const SizedBox(height: 4),
+                const SizedBox(height: 4),
 
-              // Main Interactive Group: Left controls (SOAL, Timer, Reset) + Central Soroban View
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: _groupHorizontalPadding,
-                    vertical: 2.0,
-                  ),
-                  child: Center(
-                    child: FractionallySizedBox(
-                      widthFactor: groupScale,
-                      heightFactor: groupScale,
-                      child: Row(
-                        children: [
-                          _buildLeftPanel(context, controller),
+                // Main Interactive Group: Left controls (SOAL, Timer, Reset) + Central Soroban View
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: _groupHorizontalPadding,
+                      vertical: 2.0,
+                    ),
+                    child: Center(
+                      child: FractionallySizedBox(
+                        widthFactor: groupScale,
+                        heightFactor: groupScale,
+                        child: Row(
+                          children: [
+                            _buildLeftPanel(context, controller),
 
-                          const SizedBox(width: _leftPanelGap),
+                            const SizedBox(width: _leftPanelGap),
 
-                          // Central Soroban View. It is centred inside this slot;
-                          // the problem text above is what chases the painted
-                          // frame centre, not the other way round.
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.only(bottom: 2.0),
-                              child: Center(
-                                child: Transform.translate(
-                                  offset: const Offset(0, -sorobanLift),
-                                  child: const FractionallySizedBox(
-                                    widthFactor: sorobanScale,
-                                    heightFactor: sorobanScale,
-                                    child: AspectRatio(
-                                      aspectRatio: 2.05,
-                                      child: SorobanView(
-                                        travelBoost: sorobanTravelBoost,
+                            // Central Soroban View. It is centred inside this slot;
+                            // the problem text above is what chases the painted
+                            // frame centre, not the other way round.
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.only(bottom: 2.0),
+                                child: Center(
+                                  child: Transform.translate(
+                                    offset: const Offset(0, -sorobanLift),
+                                    child: FractionallySizedBox(
+                                      widthFactor: sorobanScale,
+                                      heightFactor: sorobanScale,
+                                      child: AspectRatio(
+                                        aspectRatio: 2.05,
+                                        child:
+                                            _buildSorobanWithSplitOverlay(
+                                          context,
+                                          controller,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -234,6 +275,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
     );
 
     if (shouldLeave == true && context.mounted) {
+      controller.cancelChallengeSession();
       Navigator.of(context).pop();
     }
   }
@@ -553,7 +595,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
                   ValueListenableBuilder<int>(
                     valueListenable: controller.elapsedSeconds,
                     builder: (context, seconds, _) => Text(
-                      _formatTime(seconds * 1000),
+                      formatTimeMs(seconds * 1000),
                       style: SorobanTheme.timerStyle.copyWith(fontSize: 12),
                     ),
                   ),
@@ -616,12 +658,113 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
     );
   }
 
-  String _formatTime(int ms) {
-    final totalSeconds = ms ~/ 1000;
-    final minutes = totalSeconds ~/ 60;
-    final seconds = totalSeconds % 60;
-    final minStr = minutes.toString().padLeft(2, '0');
-    final secStr = seconds.toString().padLeft(2, '0');
-    return '$minStr:$secStr';
+  Widget _buildSorobanWithSplitOverlay(
+    BuildContext context,
+    SorobanController controller,
+  ) {
+    final isOverlayShowing = controller.isShowingSplitOverlay;
+
+    // The overlay stays in the tree at all times so both the fade-in and the
+    // fade-out can animate; only its opacity flips with the controller state.
+    // It is clipped to the wooden frame rect by SorobanView's ClipRRect so
+    // nothing bleeds outside.
+    final Widget frameOverlay = IgnorePointer(
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 150),
+        opacity: isOverlayShowing ? 1.0 : 0.0,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Dim layer covering the board
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.32),
+              ),
+            ),
+            // Split time text floating directly over the dimmed board
+            Center(child: _buildSplitOverlayCard(controller)),
+          ],
+        ),
+      ),
+    );
+
+    return AbsorbPointer(
+      absorbing: isOverlayShowing,
+      child: SorobanView(
+        travelBoost: sorobanTravelBoost,
+        frameOverlay: frameOverlay,
+      ),
+    );
+  }
+
+  Widget _buildSplitOverlayCard(SorobanController controller) {
+    final split = controller.currentSplit;
+    final problemNum = split?.problemNumber ?? 1;
+    final durationMs = split?.durationMs ?? 0;
+    final timeFormatted = formatTimeMs(durationMs);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 18),
+      decoration: BoxDecoration(
+        color: SorobanTheme.splitCardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: SorobanTheme.beadActiveColor.withValues(alpha: 0.6),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.35),
+            blurRadius: 22,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.check_circle_rounded,
+                color: Color(0xFF5DBB63),
+                size: 26,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'SOAL $problemNum SELESAI',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            timeFormatted,
+            style: SorobanTheme.monospaceDigitStyle.copyWith(
+              fontSize: 46,
+              fontWeight: FontWeight.bold,
+              color: SorobanTheme.beadActiveColor,
+              letterSpacing: 2.5,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'KETUK LAYAR UNTUK MELANJUTKAN',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.55),
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.2,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

@@ -250,6 +250,73 @@ void main() {
       controller.executeReset();
       expect(controller.state.value, equals(0));
     });
+
+    test('tracks split times and shows split overlay on challenge problem completion', () async {
+      final controller = SorobanController();
+      addTearDown(() => controller.dispose());
+      controller.startChallengeSession(ProblemCategory.addition, Difficulty.easy);
+
+      expect(controller.splitTimes, isEmpty);
+      expect(controller.isShowingSplitOverlay, isFalse);
+
+      final firstProblem = controller.currentProblem!;
+      final targetValue = firstProblem.checkpoints.last.targetValue;
+      setBoardValue(controller, targetValue);
+
+      expect(controller.splitTimes.length, equals(1));
+      expect(controller.isShowingSplitOverlay, isTrue);
+      expect(controller.currentSplit?.problemNumber, equals(1));
+      expect(controller.currentSplit, isNotNull);
+
+      // The card no longer auto-dismisses: it stays up until the user taps
+      // it away.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(controller.isShowingSplitOverlay, isTrue);
+
+      controller.dismissSplitOverlay();
+      expect(controller.isShowingSplitOverlay, isFalse);
+      expect(controller.challengeIndex, equals(1));
+    });
+
+    test('total clock freezes while the split card is up, then resumes for the next problem', () async {
+      final controller = SorobanController();
+      addTearDown(() => controller.dispose());
+      controller.startChallengeSession(ProblemCategory.addition, Difficulty.easy);
+
+      final firstProblem = controller.currentProblem!;
+      setBoardValue(controller, firstProblem.checkpoints.last.targetValue);
+
+      final splitMs = controller.currentSplit!.durationMs;
+      // The board is locked while the card is shown, so the total must have
+      // stopped exactly at completion: total so far == this problem's split.
+      expect(controller.elapsedMilliseconds, equals(splitMs));
+
+      // While the card stays up (until it is tapped away) the clock stays
+      // frozen too.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(controller.isShowingSplitOverlay, isTrue);
+      expect(controller.elapsedMilliseconds, equals(splitMs));
+
+      // Dismissing the card starts the next problem: the clock is running
+      // again, so the total grows past the first split on its next tick.
+      controller.dismissSplitOverlay();
+      expect(controller.isShowingSplitOverlay, isFalse);
+      expect(controller.challengeIndex, equals(1));
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(controller.elapsedMilliseconds, greaterThan(splitMs));
+    });
+
+    test('cancelChallengeSession resets all timers and split state', () {
+      final controller = SorobanController();
+      addTearDown(() => controller.dispose());
+      controller.startChallengeSession(ProblemCategory.addition, Difficulty.easy);
+
+      controller.cancelChallengeSession();
+      expect(controller.isChallengeMode, isFalse);
+      expect(controller.isShowingSplitOverlay, isFalse);
+      expect(controller.splitTimes, isEmpty);
+      expect(controller.currentSplit, isNull);
+    });
   });
 
   group('SorobanController tap-to-toggle setting', () {

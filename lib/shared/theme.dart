@@ -38,6 +38,10 @@ class SorobanTheme {
   /// Unit marker dots on the beam (dots at thousands, etc.).
   static const Color beamDotColor = Color(0xFFFFFFFF);
 
+  /// Split-card background: near-black walnut so the card reads over the
+  /// dimmed board between two challenge problems.
+  static const Color splitCardColor = Color(0xFF261C14);
+
   // --- Harmonious Per-Rod Color Palette (when toggle is ON) ---
   /// 7 balanced earthy timber hues for rods 0 through 6:
   static const List<Color> perRodColors = [

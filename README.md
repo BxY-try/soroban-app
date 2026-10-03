@@ -23,11 +23,11 @@ Berdiri di atas `ChangeNotifier` + `provider`, dengan seluruh perhitungan mekani
 | **Papan bebas (Free Board)** | Papan adalah sumber kebenaran. Gestur bisa mendarat di tiang mana pun; progres hanya dibaca **saat diam** (`onGestureSettled`), lalu dicocokkan ke rantai checkpoint berdasarkan nilai — atau, untuk perkalian, dibaca sebagai **subset hasil-kali digit** dalam urutan apa pun. |
 | **Perkalian bebas urutan** | User boleh mengerjakan `× 3` dulu baru `× 20` (urutan buku teks); setiap hasil-kali yang sudah ada di papan tetap dikreditkan, dan digit persamaan yang diredupkan mengikuti board, bukan urutan soal. |
 | **Mode Practice** | Tanpa timer, tanpa tekanan. Ganti kategori & tingkat kesulitan on-the-fly, tombol Soal Berikutnya, hint/replay/retri aktif. |
-| **Mode Tantangan** | 5 soal beruntun dengan **satu timer akumulatif** untuk seluruh sesi, plus rekor waktu terbaik per kategori × kesulitan. |
+| **Mode Tantangan** | 5 soal beruntun dengan **satu timer akumulatif** untuk seluruh sesi — jam berhenti selama kartu split per soal tampil (papan terkunci), jadi totalnya murni waktu pengerjaan — plus split time per soal di layar hasil dan rekor waktu terbaik per kategori × kesulitan. |
 | **Suara taktil** | 4 variasi klak kayu diputar round-robin (tanpa pengulangan beruntun) dengan jitter volume 0.80–0.88. Satu gestur = satu klak. Tiap variasi punya `AudioPool` yang sudah di-preload, jadi klak pertama sebuah sesi tidak ikut menanggung biaya salin aset, dan konteksnya `mixWithOthers` sehingga klak tidak merebut fokus audio aplikasi lain. |
 | **Audio yang tidak bisu diam-diam** | Dua klak gagal berturut-turut memicu pembangunan ulang pool, dibatasi maksimal sekali per 3 detik. `init()` tidak lagi di-`await` saat startup; klak yang diminta sebelum pool selesai dimuat sengaja dilewati, bukan ditunda. |
 | **Render terpisah, nol rebuild saat drag** | Lukisan dipecah dua: `SorobanFramePainter` menggambar bingkai, tiang, dan beam ke `RepaintBoundary`-nya sendiri dan di-raster sekali, sedangkan lapisan manik saja yang repaint — digerakkan `Listenable` yang di-ping oleh event pointer dan ticker. Tidak ada `setState` selama jari bergerak. Bayangan blur pada maksimal 35 manik per frame diganti salinan flat ber-offset. |
-| **Jam tantangan tidak rebuild layar** | Tick 100 ms hanya mengisi `ValueNotifier<int> elapsedSeconds` tanpa `notifyListeners`; label `mm:ss` di `challenge_screen` adalah satu-satunya pendengarnya, sehingga layar tidak digambar ulang sepuluh kali per detik untuk label yang berubah sekali per detik. `elapsedMilliseconds` tetap ada dan terisi tepat saat sesi selesai. |
+| **Jam tantangan tidak rebuild layar** | Tick 100 ms hanya mengisi `ValueNotifier<int> elapsedSeconds` tanpa `notifyListeners`; label `mm:ss` di `challenge_screen` adalah satu-satunya pendengarnya, sehingga layar tidak digambar ulang sepuluh kali per detik untuk label yang berubah sekali per detik. Jam hanya menghitung waktu saat user bisa mengerjakan: berhenti persis saat kartu split muncul dan jalan lagi saat soal berikutnya dimulai; saat berhenti tickernya dibatalkan sehingga tidak ada biaya sama sekali. `elapsedMilliseconds` tetap ada dan terisi tepat saat sesi selesai. |
 | **Multi-sentuh & lifecycle aman** | Gestur yang terputus saat app di-background tidak me-rollback papan; sesi pointer dibersihkan dan board diteruskan apa adanya. |
 
 ---
@@ -160,7 +160,7 @@ flutter analyze   # harus 0 issue
 flutter test
 ```
 
-218 test case tersebar di 12 file test:
+221 test case tersebar di 12 file test:
 
 | File | Test | Cakupan |
 |---|---|---|
@@ -171,7 +171,7 @@ flutter test
 | `test/core/multiplication_invariants_test.dart` | 28 | Invarian perkalian: batas kapasitas tepat & satu tiang kurang, sifat menyeluruh `decompose` (jumlah = product atau ditolak) untuk semua `rodCount` 1–6, problem buatan luar generator, solved ⇔ papan = product, identitas kontribusi kembar, konvergensi Hint dari setiap board (termasuk board ambigu) |
 | `test/core/problem_generator_test.dart` | 9 | Konvensi digit/suku, batas 7 tiang, running total anti-negatif, perkalian selalu lolos `forProblem`, `rodCount` dihormati, reject-and-retry, permintaan mustahil → `StateError` |
 | `test/core/hint_engine_test.dart` | 3 | Pemilihan checkpoint, rollback replay, recovery divergensi |
-| `test/core/soroban_controller_test.dart` | 17 | Gestur manual, checkpoint, reset/retry, setelan, timer |
+| `test/core/soroban_controller_test.dart` | 20 | Gestur manual, checkpoint, reset/retry, setelan, timer, split time & jam berhenti selama kartu split tampil |
 | `test/core/checkpoint_progression_test.dart` | 22 | Papan bebas, rekonsiliasi di titik diam, skip checkpoint, target berulang, rantai snapshot tanpa lubang |
 | `test/core/sound_service_test.dart` | 3 | Variasi klak, penghitung request, urutan asset |
 | `test/features/soroban_widget/soroban_layout_test.dart` | 39 | Geometri, fisika dorong-tarik, threshold, gutter kiri/kanan, lantai pitch |

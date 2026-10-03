@@ -414,10 +414,252 @@ void main() {
       ),
     );
 
-    expect(find.text('TANTANGAN SELESAI!'), findsOneWidget);
-    expect(find.text('Menu Utama'), findsOneWidget);
-    expect(find.text('Coba Lagi'), findsOneWidget);
+    expect(find.text('Tantangan selesai!'), findsOneWidget);
+    expect(find.byIcon(Icons.home_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.refresh_rounded), findsOneWidget);
+    expect(find.text('Level'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tapping the screen dismisses the split card and starts the next problem',
+      (tester) async {
+    final controller = SorobanController();
+    addTearDown(() => controller.dispose());
+
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    controller.startChallengeSession(ProblemCategory.addition, Difficulty.easy);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const ChallengeScreen(),
+        ),
+      ),
+    );
+
+    // Finish the first problem: its split card covers the board and the
+    // board itself is locked.
+    setBoardValue(
+      controller,
+      controller.currentProblem!.checkpoints.last.targetValue,
+    );
+    await tester.pump();
+
+    expect(controller.isShowingSplitOverlay, isTrue);
+    expect(find.text('SOAL 1 SELESAI'), findsOneWidget);
+
+    // The card stays up until it is tapped away, wherever the tap lands.
+    await tester.tapAt(const Offset(640, 360));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(controller.isShowingSplitOverlay, isFalse);
+    expect(controller.challengeIndex, equals(1));
+    expect(find.text('2/5'), findsOneWidget);
+
+    // End the session so its clock does not outlive the test.
+    controller.cancelChallengeSession();
+    await tester.pump();
+  });
+
+  testWidgets('completing all five problems navigates to the result screen',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final controller = SorobanController();
+    addTearDown(() => controller.dispose());
+
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    controller.startChallengeSession(ProblemCategory.addition, Difficulty.easy);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const ChallengeScreen(),
+        ),
+      ),
+    );
+
+    // Work through the whole session: each problem ends with its split card,
+    // which is dismissed to start the next problem — the last one finishes
+    // the session instead.
+    for (var problem = 0; problem < controller.totalChallengeProblems; problem++) {
+      setBoardValue(
+        controller,
+        controller.currentProblem!.checkpoints.last.targetValue,
+      );
+      await tester.pump();
+      controller.dismissSplitOverlay();
+      await tester.pump();
+    }
+
+    expect(controller.isChallengeCompleted, isTrue);
+    expect(
+      controller.splitTimes.length,
+      equals(controller.totalChallengeProblems),
+    );
+
+    // The session clock stopped with the last split card, so the route
+    // transition is the only animation left to run out: let the tree settle
+    // on its own instead of counting frames by hand.
+    await tester.pumpAndSettle();
+
+    // The transition is owned by the screen, not by build(): the result
+    // screen shows up as soon as the session reports finished.
+    expect(find.text('Tantangan selesai!'), findsOneWidget);
+
+    // A fresh session always records its own time, so the best record wears
+    // the NEW sticker.
+    expect(find.text('NEW'), findsOneWidget);
+  });
+
+  testWidgets('ResultScreen NEW sticker does not shift the result layout',
+      (tester) async {
+    // Both configurations render the same content at the same viewport; the
+    // only difference is whether the NEW sticker is present. If the sticker
+    // took any layout space of its own, these anchors would move between the
+    // two pumps.
+    tester.view.physicalSize = const Size(640, 360);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    // Anchors spread across the summary column, the split card, and the
+    // action row. Their positions depend on the card sizes, not on the time
+    // values, so differing split values between the two runs cannot fake a
+    // shift.
+    Map<String, Offset> captureAnchors() => {
+          'splitCardTop': tester.getTopLeft(find.text('Waktu per Soal')),
+          'splitTotal': tester.getCenter(find.text('Total')),
+          'bestLabel': tester.getTopLeft(find.text('Rekor Terbaik')),
+          'yourTimeLabel': tester.getCenter(find.text('Waktu Kamu')),
+          'mainLagi': tester.getCenter(find.byIcon(Icons.refresh_rounded)),
+        };
+
+    Future<void> pumpCompletedSession({required bool withNewRecord}) async {
+      SharedPreferences.setMockInitialValues({});
+      final controller = SorobanController();
+      addTearDown(() => controller.dispose());
+
+      if (!withNewRecord) {
+        // A stored best of 0 ms cannot be matched or beaten by a run that
+        // takes any measurable time, so this run never reads as a record.
+        await controller.recordTimeIfBest(
+          ProblemCategory.addition,
+          Difficulty.easy,
+          0,
+        );
+      }
+      controller.startChallengeSession(
+        ProblemCategory.addition,
+        Difficulty.easy,
+      );
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: controller,
+          child: MaterialApp(
+            theme: SorobanTheme.themeData,
+            home: const ChallengeScreen(),
+          ),
+        ),
+      );
+
+      for (var problem = 0;
+          problem < controller.totalChallengeProblems;
+          problem++) {
+        setBoardValue(
+          controller,
+          controller.currentProblem!.checkpoints.last.targetValue,
+        );
+        await tester.pump();
+        controller.dismissSplitOverlay();
+        await tester.pump();
+      }
+
+      await tester.pumpAndSettle();
+      expect(find.text('Tantangan selesai!'), findsOneWidget);
+    }
+
+    await pumpCompletedSession(withNewRecord: false);
+    expect(find.text('NEW'), findsNothing);
+    final withoutSticker = captureAnchors();
+
+    await pumpCompletedSession(withNewRecord: true);
+    expect(find.text('NEW'), findsOneWidget);
+    final withSticker = captureAnchors();
+
+    withoutSticker.forEach((name, without) {
+      expect(
+        withSticker[name]!.dx,
+        closeTo(without.dx, 0.01),
+        reason: 'horizontal position of $name moved',
+      );
+      expect(
+        withSticker[name]!.dy,
+        closeTo(without.dy, 0.01),
+        reason: 'vertical position of $name moved',
+      );
+    });
+
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'ResultScreen Level button opens the level selection of the played category',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final controller = SorobanController();
+    addTearDown(() => controller.dispose());
+
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    // Play a category other than addition so the category hand-off is
+    // observable: the Level button must carry the played category with it.
+    controller.startChallengeSession(ProblemCategory.mixed, Difficulty.medium);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const ChallengeScreen(),
+        ),
+      ),
+    );
+
+    for (var problem = 0; problem < controller.totalChallengeProblems; problem++) {
+      setBoardValue(
+        controller,
+        controller.currentProblem!.checkpoints.last.targetValue,
+      );
+      await tester.pump();
+      controller.dismissSplitOverlay();
+      await tester.pump();
+    }
+
+    await tester.pumpAndSettle();
+    expect(find.text('Tantangan selesai!'), findsOneWidget);
+
+    await tester.tap(find.text('Level'));
+    await tester.pumpAndSettle();
+
+    // The level picker of the played category, not the settings screen.
+    expect(
+      find.text('Tingkat Kesulitan: Campuran (+ / -)'),
+      findsOneWidget,
+    );
+    expect(find.text('Mulai (5 Soal)'), findsNWidgets(3));
   });
 
   testWidgets('ChallengeScreen Soroban keeps beads stable while travel grows across sizes',

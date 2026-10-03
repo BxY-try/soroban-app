@@ -41,10 +41,15 @@ class SorobanView extends StatefulWidget {
   /// beads. 0.0 keeps the default behaviour where travel follows bead size.
   final double travelBoost;
 
+  /// Optional overlay placed directly on top of the wooden frame,
+  /// geometrically clipped to [SorobanLayout.frameRect] with matching corner radius.
+  final Widget? frameOverlay;
+
   const SorobanView({
     super.key,
     this.showDigitalReadout = true,
     this.travelBoost = 0.0,
+    this.frameOverlay,
   });
 
   @override
@@ -437,6 +442,18 @@ class _SorobanViewState extends State<SorobanView>
                   ),
                 ),
               ),
+              // Frame overlay: fits exactly the wooden frame bounds
+              if (widget.frameOverlay != null)
+                Positioned(
+                  left: _getLayout(totalRods).frameRect.left,
+                  top: _getLayout(totalRods).frameRect.top,
+                  width: _getLayout(totalRods).frameRect.width,
+                  height: _getLayout(totalRods).frameRect.height,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: widget.frameOverlay!,
+                  ),
+                ),
             ],
           ),
         );

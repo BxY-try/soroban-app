@@ -10,6 +10,21 @@ import '../models/problem.dart';
 import '../models/soroban_state.dart';
 import '../services/sound_service.dart';
 
+/// The finished problem behind the split card: which problem it was and how
+/// long it took.
+class SplitInfo {
+  /// 1-based position of the problem in the session (3 for the third of five).
+  final int problemNumber;
+
+  /// Time spent on that problem, in milliseconds.
+  final int durationMs;
+
+  const SplitInfo({
+    required this.problemNumber,
+    required this.durationMs,
+  });
+}
+
 /// Single source of truth managing Soroban state, chained animations,
 /// trail highlights, hint execution, replay rollback, and challenge sessions.
 class SorobanController extends ChangeNotifier {
@@ -126,6 +141,10 @@ class SorobanController extends ChangeNotifier {
 
   /// Whole seconds of the running challenge, for the on-screen clock.
   ///
+  /// The clock counts only time the user can actually work: it freezes while a
+  /// split card is shown and restarts with the next problem, so the total is
+  /// pure solving time.
+  ///
   /// The clock face only changes once a second, so it listens to this instead
   /// of the controller: a [ValueNotifier] tells its listeners only when the
   /// value actually changes. The 100 ms tick used to call [notifyListeners],
@@ -133,6 +152,23 @@ class SorobanController extends ChangeNotifier {
   /// redraw a label that changes once.
   final ValueNotifier<int> _elapsedSeconds = ValueNotifier<int>(0);
   ValueListenable<int> get elapsedSeconds => _elapsedSeconds;
+
+  // --- Challenge Split Times & Overlay ---
+  final List<int> _splitTimes = [];
+  List<int> get splitTimes => List.unmodifiable(_splitTimes);
+
+  int _problemStartTimeMs = 0;
+
+  /// The problem whose card currently covers the board. Null while the board
+  /// is workable, so the split card's number and duration can never drift
+  /// apart.
+  SplitInfo? _currentSplit;
+  SplitInfo? get currentSplit => _currentSplit;
+
+  /// Whether the split card is covering the board.
+  bool get isShowingSplitOverlay => _currentSplit != null;
+
+  bool _isDisposed = false;
 
   // --- Animation & Interaction Lock ---
   bool _isAnimating = false;
@@ -248,6 +284,22 @@ class SorobanController extends ChangeNotifier {
     return false;
   }
 
+  /// Runs the 100 ms clock ticker that feeds [elapsedMilliseconds] and
+  /// [elapsedSeconds] from the stopwatch.
+  ///
+  /// The tick deliberately never calls [notifyListeners]: only the seconds
+  /// label listens to [elapsedSeconds], and a [ValueNotifier] wakes it just
+  /// when the whole second changes. Freezing the clock is only ever a matter
+  /// of stopping the stopwatch and cancelling the ticker, so a frozen clock
+  /// costs nothing at all.
+  void _startTicker() {
+    _ticker?.cancel();
+    _ticker = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      _elapsedMilliseconds = _stopwatch.elapsedMilliseconds;
+      _elapsedSeconds.value = _elapsedMilliseconds ~/ 1000;
+    });
+  }
+
   // --- Setup Modes ---
   void startPracticeProblem(ProblemCategory category, Difficulty difficulty) {
     final problem = problemGenerator.generateProblem(
@@ -262,6 +314,8 @@ class SorobanController extends ChangeNotifier {
 
     _isChallengeMode = false;
     _isChallengeCompleted = false;
+    _currentSplit = null;
+    _splitTimes.clear();
     _stopwatch.reset();
     _stopwatch.stop();
     _ticker?.cancel();
@@ -288,23 +342,34 @@ class SorobanController extends ChangeNotifier {
 
     _isChallengeMode = true;
     _isChallengeCompleted = false;
+    _currentSplit = null;
+    _splitTimes.clear();
     _challengeIndex = 0;
     _challengeProblems = problems;
+    _problemStartTimeMs = 0;
 
     _stopwatch.reset();
     _stopwatch.start();
-    _ticker?.cancel();
     _elapsedMilliseconds = 0;
     _elapsedSeconds.value = 0;
-    _ticker = Timer.periodic(const Duration(milliseconds: 100), (_) {
-      _elapsedMilliseconds = _stopwatch.elapsedMilliseconds;
-      // Deliberately no notifyListeners(): see [elapsedSeconds]. Everything
-      // else that changes (beads, checkpoints, completion) notifies for itself.
-      _elapsedSeconds.value = _elapsedMilliseconds ~/ 1000;
-    });
+    _startTicker();
 
     _currentProblem = _challengeProblems[0];
     _resetToNewProblem();
+  }
+
+  /// Cancels an in-progress challenge session and resets state/timers.
+  void cancelChallengeSession() {
+    _ticker?.cancel();
+    _stopwatch.stop();
+    _stopwatch.reset();
+    _isChallengeMode = false;
+    _isChallengeCompleted = false;
+    _currentSplit = null;
+    _isAnimating = false;
+    _splitTimes.clear();
+    _elapsedMilliseconds = 0;
+    _elapsedSeconds.value = 0;
   }
 
   void _resetToNewProblem() {
@@ -590,30 +655,68 @@ class SorobanController extends ChangeNotifier {
 
   void _handleProblemCompleted() {
     if (_isChallengeMode) {
-      if (_challengeIndex + 1 < _challengeProblems.length) {
-        _challengeIndex++;
-        _currentProblem = _challengeProblems[_challengeIndex];
-        // Brief pause before displaying next problem
-        Future.delayed(const Duration(milliseconds: 600), () {
-          _resetToNewProblem();
-        });
-      } else {
-        // Challenge finished!
-        _stopwatch.stop();
-        _ticker?.cancel();
-        _elapsedMilliseconds = _stopwatch.elapsedMilliseconds;
-        _elapsedSeconds.value = _elapsedMilliseconds ~/ 1000;
-        _isChallengeCompleted = true;
-        if (_currentProblem != null) {
-          recordTimeIfBest(
-            _currentProblem!.category,
-            _currentProblem!.difficulty,
-            _elapsedMilliseconds,
-          );
-        }
-        notifyListeners();
-      }
+      final nowMs = _stopwatch.elapsedMilliseconds;
+      final splitMs = nowMs - _problemStartTimeMs;
+      _splitTimes.add(splitMs);
+      _currentSplit = SplitInfo(
+        problemNumber: _challengeIndex + 1,
+        durationMs: splitMs,
+      );
+      _isAnimating = true;
+      notifyListeners();
+
+      // The board is locked while the split card is up, so the total clock
+      // stops with it: time the user cannot spend on the abacus is not
+      // charged to them. The card stays up until [dismissSplitOverlay].
+      _stopwatch.stop();
+      _ticker?.cancel();
+      _elapsedMilliseconds = _stopwatch.elapsedMilliseconds;
     }
+  }
+
+  /// Dismisses the split card the user tapped away: it unlocks the board and
+  /// starts the next challenge problem, or settles the session when this was
+  /// the last problem.
+  void dismissSplitOverlay() {
+    if (_isDisposed || !_isChallengeMode || _currentSplit == null) return;
+
+    _currentSplit = null;
+    _isAnimating = false;
+
+    if (_challengeIndex + 1 < _challengeProblems.length) {
+      _challengeIndex++;
+      _currentProblem = _challengeProblems[_challengeIndex];
+      _resetToNewProblem();
+      _problemStartTimeMs = _stopwatch.elapsedMilliseconds;
+      // The next problem is workable again, so the clock runs again.
+      _stopwatch.start();
+      _elapsedMilliseconds = _stopwatch.elapsedMilliseconds;
+      _startTicker();
+      notifyListeners();
+    } else {
+      // Challenge finished! The clock already stopped when this last
+      // split card came up; only the final numbers need settling.
+      _elapsedMilliseconds = _stopwatch.elapsedMilliseconds;
+      _elapsedSeconds.value = _elapsedMilliseconds ~/ 1000;
+      _isChallengeCompleted = true;
+      _recordSessionBestTime();
+      notifyListeners();
+    }
+  }
+
+  /// Records the finished session as the new best time.
+  ///
+  /// Runs fire-and-forget: persistence must not hold up the result transition,
+  /// and a failed write (storage unavailable) must not surface as an unhandled
+  /// async error after the session is already over — it just leaves the
+  /// previous record in place.
+  void _recordSessionBestTime() {
+    final problem = _currentProblem;
+    if (problem == null) return;
+    unawaited(
+      recordTimeIfBest(problem.category, problem.difficulty, _elapsedMilliseconds)
+          .catchError((Object _) => false),
+    );
   }
 
   bool get canReset =>
@@ -925,6 +1028,7 @@ class SorobanController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _isDisposed = true;
     _ticker?.cancel();
     _stopwatch.stop();
     _elapsedSeconds.dispose();
