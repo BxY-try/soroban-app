@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../core/models/problem.dart';
 import '../../core/state/soroban_controller.dart';
 import '../../shared/theme.dart';
 import '../../shared/time_format.dart';
+import '../../shared/widgets/problem_equation_text.dart';
 import '../settings/settings_screen.dart';
-import '../soroban_widget/soroban_layout.dart';
+import '../soroban_widget/exercise_layout.dart';
 import '../soroban_widget/soroban_view.dart';
 import 'result_screen.dart';
 
@@ -13,6 +13,10 @@ import 'result_screen.dart';
 /// Implements the compact landscape layout:
 /// - Top strip: Back button (left), Centered Problem text (center), Settings (right).
 /// - Main area: Left panel (problem number, timer, reset) + Central Soroban.
+///
+/// The layout geometry and the equation widget are shared with the Practice
+/// screen via [ExerciseLayout] / [ProblemEquationText], so both modes stay
+/// centred on the same abacus axis.
 class ChallengeScreen extends StatefulWidget {
   const ChallengeScreen({super.key});
 
@@ -21,49 +25,6 @@ class ChallengeScreen extends StatefulWidget {
 }
 
 class _ChallengeScreenState extends State<ChallengeScreen> {
-  /// Scale factor for the main interactive challenge area (left controls + Soroban)
-  /// to provide gentle breathing room towards the center without shrinking excessively.
-  static const double groupScale = 0.98;
-
-  /// Scale factor for the Soroban itself inside the main area, so the abacus
-  /// reads slightly larger than the surrounding chrome while keeping safe margins.
-  static const double sorobanScale = 0.992;
-
-  /// Lifts the whole Soroban block (abacus frame + digital readout) upward by this
-  /// many pixels so the space below it is no longer cramped.
-  ///
-  /// Applied as a paint transform on purpose: the box keeps the exact layout
-  /// constraints it had before, so the frame dimensions and the bead size are
-  /// untouched — unlike a bottom/top padding change, which would take the height
-  /// away from the abacus and shrink the beads.
-  static const double sorobanLift = 5.0;
-
-  /// Extra bead travel (px) granted to each deck, widening the heaven↔beam and
-  /// beam↔earth gaps at the cost of bead height.
-  ///
-  /// Sized so the beads land at ~8% above the pre-scale-bump baseline (the
-  /// bigger scale requested in 457418a would otherwise inflate them by ~10%,
-  /// because the vertical budget is exactly saturated). Practice mode keeps the
-  /// default 0.0 and is therefore unaffected.
-  static const double sorobanTravelBoost = 3.92;
-
-  // ── Main area layout chain ─────────────────────────────────────────
-  // These four values define how the Soroban is positioned horizontally.
-  // They are used BOTH by the layout chain itself and by [_abacusFrameFor], so
-  // the problem text can be centred on the abacus without duplicating numbers.
-
-  /// Horizontal padding around the whole left-panel + Soroban group.
-  static const double _groupHorizontalPadding = 10.0;
-
-  /// Fixed width of the left control panel.
-  static const double _leftPanelWidth = 56.0;
-
-  /// Gap between the left control panel and the Soroban.
-  static const double _leftPanelGap = 12.0;
-
-  /// Margin kept between the problem text and the right screen edge.
-  static const double _problemTextRightInset = 10.0;
-
   /// The session this screen navigates on, held by the completion listener so
   /// it can run without a [context] lookup on every notification.
   late final SorobanController _controller;
@@ -103,53 +64,6 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
     );
   }
 
-  /// Horizontal geometry of the painted Soroban for a content area
-  /// [contentWidth] px wide.
-  ///
-  /// Mirrors, value for value, the layout chain that positions the SorobanView:
-  /// group padding, [groupScale] on the whole group, the fixed left panel plus
-  /// [_leftPanelGap], then [sorobanScale] on the Soroban itself.
-  ///
-  /// Both the layout chain and this function read the constants above, and
-  /// `widget_test.dart` asserts the problem text lands on the *actually laid out*
-  /// frame centre at several screen sizes. That assertion is the drift guard: if
-  /// the chain ever changes shape, the text follows this function instead of the
-  /// real box, and that test fails.
-  ///
-  /// [frameCenter] is the centre of the *painted frame*, which is NOT the centre
-  /// of the box whenever the left and right gutters differ. That is exactly the
-  /// value the problem text should sit on.
-  static ({double left, double width, double frameCenter}) _abacusFrameFor(
-    double contentWidth,
-  ) {
-    final avail = contentWidth - 2 * _groupHorizontalPadding;
-    final groupWidth = avail * groupScale;
-    final groupLeft = _groupHorizontalPadding + (avail - groupWidth) / 2;
-
-    final slotWidth = groupWidth - _leftPanelWidth - _leftPanelGap;
-    final boxWidth = slotWidth > 0.0 ? slotWidth * sorobanScale : 0.0;
-    final boxLeft = groupLeft + _leftPanelWidth + _leftPanelGap +
-        (slotWidth - boxWidth) / 2;
-
-    // The frame is inset by the SorobanLayout gutters, which may be asymmetric.
-    final gutters = SorobanLayout.guttersFor(boxWidth);
-    final frameCenter =
-        boxLeft + boxWidth / 2 + (gutters.left - gutters.right) / 2;
-
-    return (left: boxLeft, width: boxWidth, frameCenter: frameCenter);
-  }
-
-  /// Left inset of the problem text band that centres it on the abacus frame
-  /// while keeping [_problemTextRightInset] free on the right.
-  ///
-  /// With symmetric gutters this returns the historical 78.0 exactly, so turning
-  /// both gutter scales to 1.0 restores the previous layout bit for bit.
-  static double _problemTextLeftFor(double contentWidth) {
-    return 2 * _abacusFrameFor(contentWidth).frameCenter -
-        contentWidth +
-        _problemTextRightInset;
-  }
-
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<SorobanController>();
@@ -181,18 +95,18 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: _groupHorizontalPadding,
+                      horizontal: ExerciseLayout.groupHorizontalPadding,
                       vertical: 2.0,
                     ),
                     child: Center(
                       child: FractionallySizedBox(
-                        widthFactor: groupScale,
-                        heightFactor: groupScale,
+                        widthFactor: ExerciseLayout.groupScale,
+                        heightFactor: ExerciseLayout.groupScale,
                         child: Row(
                           children: [
                             _buildLeftPanel(context, controller),
 
-                            const SizedBox(width: _leftPanelGap),
+                            const SizedBox(width: ExerciseLayout.leftPanelGap),
 
                             // Central Soroban View. It is centred inside this slot;
                             // the problem text above is what chases the painted
@@ -202,10 +116,15 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
                                 padding: const EdgeInsets.only(bottom: 2.0),
                                 child: Center(
                                   child: Transform.translate(
-                                    offset: const Offset(0, -sorobanLift),
+                                    offset: const Offset(
+                                      0,
+                                      -ExerciseLayout.sorobanLift,
+                                    ),
                                     child: FractionallySizedBox(
-                                      widthFactor: sorobanScale,
-                                      heightFactor: sorobanScale,
+                                      widthFactor:
+                                          ExerciseLayout.sorobanScale,
+                                      heightFactor:
+                                          ExerciseLayout.sorobanScale,
                                       child: AspectRatio(
                                         aspectRatio: 2.05,
                                         child:
@@ -328,16 +247,24 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
           //
           // The frame centre is not the box centre when the left and right
           // frame gutters differ, so the band is derived from
-          // _problemTextLeftFor instead of a hard-coded 78.0. With symmetric
-          // gutters that helper returns 78.0 again, so this is a no-op then.
+          // ExerciseLayout.problemTextLeftFor instead of a hard-coded 78.0.
+          // With symmetric gutters that helper returns 78.0 again, so this is
+          // a no-op then.
           Positioned.fill(
             child: LayoutBuilder(
               builder: (context, constraints) => Padding(
                 padding: EdgeInsets.only(
-                  left: _problemTextLeftFor(constraints.maxWidth),
-                  right: _problemTextRightInset,
+                  left: ExerciseLayout.problemTextLeftFor(
+                    constraints.maxWidth,
+                  ),
+                  right: ExerciseLayout.problemTextRightInset,
                 ),
-                child: Center(child: _buildProblemText(controller)),
+                child: Center(
+                  child: ProblemEquationText(
+                    controller: controller,
+                    textKey: const Key('challenge_problem_text'),
+                  ),
+                ),
               ),
             ),
           ),
@@ -346,185 +273,13 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
     );
   }
 
-  /// Displays the mathematical problem equation, centered to the Soroban with dynamic font sizing
-  /// and faded visual feedback for completed checkpoint digits.
-  Widget _buildProblemText(SorobanController controller) {
-    final problem = controller.currentProblem;
-    if (problem == null) return const SizedBox.shrink();
-
-    final displayText = problem.displayText;
-    final length = displayText.length;
-
-    // Dynamic font sizing based on equation length:
-    final double fontSize;
-    if (length <= 8) {
-      fontSize = 25.0;
-    } else if (length <= 14) {
-      fontSize = 22.0;
-    } else if (length <= 20) {
-      fontSize = 19.0;
-    } else {
-      fontSize = 17.0;
-    }
-
-    final activeCpIdx = controller.activeCheckpointIndex;
-    final textSpans = _buildProblemTextSpans(
-      problem: problem,
-      activeCheckpointIndex: activeCpIdx,
-      fontSize: fontSize,
-      controller: controller,
-    );
-
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.center,
-      child: Text.rich(
-        key: const Key('challenge_problem_text'),
-        TextSpan(
-          style: SorobanTheme.problemEquationStyle(fontSize: fontSize),
-          children: textSpans,
-        ),
-        textAlign: TextAlign.center,
-      ),
-    );
-  }
-
-  List<InlineSpan> _buildProblemTextSpans({
-    required Problem problem,
-    required int activeCheckpointIndex,
-    required double fontSize,
-    required SorobanController controller,
-  }) {
-    final spans = <InlineSpan>[];
-
-    if (problem.category == ProblemCategory.multiplication1 ||
-        problem.category == ProblemCategory.multiplication2) {
-      if (problem.terms.length >= 2) {
-        // Multiplicand (term 0)
-        final aStr = problem.terms[0].abs().toString();
-        for (int d = 0; d < aStr.length; d++) {
-          final isDone = _isDigitCompleted(
-            problem: problem,
-            controller: controller,
-            activeCheckpointIndex: activeCheckpointIndex,
-            termIndex: 0,
-            digitIndex: d,
-          );
-          spans.add(TextSpan(
-            text: aStr[d],
-            style: isDone
-                ? SorobanTheme.problemEquationCompletedStyle(fontSize: fontSize)
-                : SorobanTheme.problemEquationStyle(fontSize: fontSize),
-          ));
-        }
-
-        // Operator
-        spans.add(TextSpan(
-          text: ' × ',
-          style: SorobanTheme.problemEquationStyle(fontSize: fontSize),
-        ));
-
-        // Multiplier (term 1)
-        final bStr = problem.terms[1].abs().toString();
-        for (int d = 0; d < bStr.length; d++) {
-          final isDone = _isDigitCompleted(
-            problem: problem,
-            controller: controller,
-            activeCheckpointIndex: activeCheckpointIndex,
-            termIndex: 1,
-            digitIndex: d,
-          );
-          spans.add(TextSpan(
-            text: bStr[d],
-            style: isDone
-                ? SorobanTheme.problemEquationCompletedStyle(fontSize: fontSize)
-                : SorobanTheme.problemEquationStyle(fontSize: fontSize),
-          ));
-        }
-      }
-      return spans;
-    }
-
-    // Addition & Mixed: terms separated by operators
-    for (int t = 0; t < problem.terms.length; t++) {
-      if (t > 0 && t - 1 < problem.operators.length) {
-        spans.add(TextSpan(
-          text: ' ${problem.operators[t - 1]} ',
-          style: SorobanTheme.problemEquationStyle(fontSize: fontSize),
-        ));
-      }
-
-      final termStr = problem.terms[t].abs().toString();
-      for (int d = 0; d < termStr.length; d++) {
-        final isDone = _isDigitCompleted(
-          problem: problem,
-          controller: controller,
-          activeCheckpointIndex: activeCheckpointIndex,
-          termIndex: t,
-          digitIndex: d,
-        );
-        spans.add(TextSpan(
-          text: termStr[d],
-          style: isDone
-              ? SorobanTheme.problemEquationCompletedStyle(fontSize: fontSize)
-              : SorobanTheme.problemEquationStyle(fontSize: fontSize),
-        ));
-      }
-    }
-
-    return spans;
-  }
-
-  bool _isDigitCompleted({
-    required Problem problem,
-    required SorobanController controller,
-    required int activeCheckpointIndex,
-    required int termIndex,
-    required int digitIndex,
-  }) {
-    if (activeCheckpointIndex <= 0) {
-      return false;
-    }
-    if (activeCheckpointIndex >= problem.checkpoints.length) {
-      return true;
-    }
-
-    if (problem.category == ProblemCategory.multiplication1 ||
-        problem.category == ProblemCategory.multiplication2) {
-      // Which contributions the board holds is the controller's call, not a
-      // position in the canonical chain: the user may have worked in any order.
-      return controller.isMultiplicationDigitCompleted(
-        termIndex: termIndex,
-        digitIndex: digitIndex,
-      );
-    }
-
-    // Addition & Mixed:
-    // 1. Direct match with any completed checkpoint:
-    for (int k = 0; k < activeCheckpointIndex; k++) {
-      final cp = problem.checkpoints[k];
-      if (cp.termIndex == termIndex && cp.digitIndex == digitIndex) {
-        return true;
-      }
-    }
-
-    // 2. If this digit didn't generate a checkpoint (e.g. '0'):
-    final lastCompleted = problem.checkpoints[activeCheckpointIndex - 1];
-    if (lastCompleted.termIndex > termIndex) return true;
-    if (lastCompleted.termIndex == termIndex && lastCompleted.digitIndex > digitIndex) {
-      return true;
-    }
-
-    return false;
-  }
-
   /// Left panel containing the interactive badges and reset button:
   /// 1. Badge posisi soal ("SOAL 1/5")
   /// 2. Badge waktu ("00:12") dengan jarak napas yang ditambah lebih lega (18px)
   /// 3. Spacer mendorong tombol Reset ke bawah
   /// 4. Tombol Reset dinaikkan lagi (bottom padding 44px)
   Widget _buildLeftPanel(BuildContext context, SorobanController controller) {
-    const panelWidth = _leftPanelWidth;
+    const panelWidth = ExerciseLayout.leftPanelWidth;
     return SizedBox(
       width: panelWidth,
       child: Column(
@@ -691,7 +446,7 @@ class _ChallengeScreenState extends State<ChallengeScreen> {
     return AbsorbPointer(
       absorbing: isOverlayShowing,
       child: SorobanView(
-        travelBoost: sorobanTravelBoost,
+        travelBoost: ExerciseLayout.sorobanTravelBoost,
         frameOverlay: frameOverlay,
       ),
     );

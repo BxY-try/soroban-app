@@ -3,13 +3,21 @@ import 'package:provider/provider.dart';
 import '../../core/models/problem.dart';
 import '../../core/state/soroban_controller.dart';
 import '../../shared/theme.dart';
+import '../../shared/widgets/problem_equation_text.dart';
 import '../settings/settings_screen.dart';
+import '../soroban_widget/exercise_layout.dart';
 import '../soroban_widget/soroban_view.dart';
 
 /// Free-play Practice Mode (Mode Latihan Bebas):
 /// - No timer, no pressure.
 /// - Switch categories & difficulty on the fly.
 /// - Full-digit chained hints, replay, and reset controls.
+///
+/// The layout mirrors the challenge screen through the shared [ExerciseLayout]
+/// geometry: same top strip (back left, settings right, equation centred on
+/// the abacus frame), same main group (left control panel + Soroban). The
+/// category & difficulty dropdowns stay in the top strip, pinned to their own
+/// [Positioned] child so their width can never shift the equation centre.
 class PracticeScreen extends StatefulWidget {
   const PracticeScreen({super.key});
 
@@ -33,84 +41,85 @@ class _PracticeScreenState extends State<PracticeScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<SorobanController>();
-    final problem = controller.currentProblem;
 
     return Scaffold(
       backgroundColor: SorobanTheme.backgroundColor,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
-          child: Column(
-            children: [
-              // Top Strip (Stack-based, back button matches SettingsScreen position)
-              _buildTopStrip(context, controller, problem),
+        child: Column(
+          children: [
+            // Top strip: back left, settings right, equation centred on the
+            // abacus frame — exactly like the challenge screen.
+            _buildTopStrip(context, controller),
 
-              const SizedBox(height: 4),
+            const SizedBox(height: 4),
 
-              // Big Soroban Focal Point (Scaled slightly for elegant margins)
-              const Expanded(
+            // Main interactive group: left controls + central Soroban View.
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: ExerciseLayout.groupHorizontalPadding,
+                  vertical: 2.0,
+                ),
                 child: Center(
                   child: FractionallySizedBox(
-                    widthFactor: 0.94,
-                    heightFactor: 0.94,
-                    child: AspectRatio(
-                      aspectRatio: 2.05,
-                      child: SorobanView(),
+                    widthFactor: ExerciseLayout.groupScale,
+                    heightFactor: ExerciseLayout.groupScale,
+                    child: Row(
+                      children: [
+                        _buildLeftPanel(context, controller),
+
+                        const SizedBox(width: ExerciseLayout.leftPanelGap),
+
+                        // Central Soroban View. It is centred inside this slot;
+                        // the problem text above is what chases the painted
+                        // frame centre, not the other way round.
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 2.0),
+                            child: Center(
+                              child: Transform.translate(
+                                offset: const Offset(
+                                  0,
+                                  -ExerciseLayout.sorobanLift,
+                                ),
+                                child: const FractionallySizedBox(
+                                  widthFactor: ExerciseLayout.sorobanScale,
+                                  heightFactor: ExerciseLayout.sorobanScale,
+                                  child: AspectRatio(
+                                    aspectRatio: 2.05,
+                                    child: SorobanView(
+                                      travelBoost:
+                                          ExerciseLayout.sorobanTravelBoost,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
-
-              const SizedBox(height: 4),
-
-              // Compact Bottom Strip: 3 Icon-only buttons
-              SizedBox(
-                height: 36,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // 1. Reset / Retri
-                    _buildControlButton(
-                      icon: Icons.restart_alt_rounded,
-                      tooltip: 'Retri (Kembali ke checkpoint sebelumnya)',
-                      enabled: controller.canReset,
-                      onPressed: () => controller.executeReset(),
-                    ),
-                    const SizedBox(width: 20),
-
-                    // 2. Hint
-                    _buildControlButton(
-                      icon: Icons.lightbulb_rounded,
-                      tooltip: 'Hint digit berikutnya',
-                      isPrimary: true,
-                      enabled: !controller.isAnimating &&
-                          problem != null &&
-                          controller.activeCheckpointIndex < problem.checkpoints.length,
-                      onPressed: () => controller.executeHint(),
-                    ),
-                    const SizedBox(width: 20),
-
-                    // 3. Replay Hint
-                    _buildControlButton(
-                      icon: Icons.repeat_rounded,
-                      tooltip: 'Replay Hint (Putar ulang animasi langkah digit ini)',
-                      enabled: controller.canReplay,
-                      onPressed: () => controller.executeReplay(),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  /// Top strip with Stack-based layout:
+  /// Top strip with Stack-based layout, matching the challenge screen:
   /// - Back button at exact SettingsScreen position (left: 4.0)
-  /// - Dropdowns, problem text, next & settings buttons in the remaining area
-  Widget _buildTopStrip(BuildContext context, SorobanController controller, Problem? problem) {
+  /// - Category & difficulty dropdowns pinned at left: 52.0 (practice only)
+  /// - Equation band centred on the abacus frame via
+  ///   [ExerciseLayout.problemTextLeftFor] (same source as Challenge)
+  /// - Next & settings buttons pinned to the right edge
+  ///
+  /// Everything except the equation band is absolutely positioned, so neither
+  /// the dropdowns' width nor the equation's length can move the equation's
+  /// centre: the band is derived from the full content width alone.
+  Widget _buildTopStrip(BuildContext context, SorobanController controller) {
     return SizedBox(
       height: 48,
       child: Stack(
@@ -132,93 +141,148 @@ class _PracticeScreenState extends State<PracticeScreen> {
             ),
           ),
 
-          // 2. Controls: dropdowns + problem text + action buttons
+          // 2. Category & difficulty selectors, pinned to the left of the
+          //    equation band. Kept as their own Positioned child (not part of
+          //    the band) so resizing them never shifts the equation.
           Positioned(
             left: 52.0,
-            right: 0,
             top: 0,
             bottom: 0,
-            child: Row(
-              children: [
-                // Category dropdown (compact)
-                DropdownButton<ProblemCategory>(
-                  value: _selectedCategory,
-                  underline: const SizedBox.shrink(),
-                  style: const TextStyle(fontSize: 13, color: SorobanTheme.textDark),
-                  items: const [
-                    DropdownMenuItem(
-                      value: ProblemCategory.addition,
-                      child: Text('Penjumlahan', style: TextStyle(fontSize: 13)),
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Category dropdown (compact)
+                  DropdownButton<ProblemCategory>(
+                    value: _selectedCategory,
+                    underline: const SizedBox.shrink(),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: SorobanTheme.textDark,
                     ),
-                    DropdownMenuItem(
-                      value: ProblemCategory.mixed,
-                      child: Text('Campuran (+/-)', style: TextStyle(fontSize: 13)),
+                    items: const [
+                      DropdownMenuItem(
+                        value: ProblemCategory.addition,
+                        child: Text('Penjumlahan', style: TextStyle(fontSize: 13)),
+                      ),
+                      DropdownMenuItem(
+                        value: ProblemCategory.mixed,
+                        child: Text('Campuran (+/-)', style: TextStyle(fontSize: 13)),
+                      ),
+                      DropdownMenuItem(
+                        value: ProblemCategory.multiplication1,
+                        child: Text('Perkalian I', style: TextStyle(fontSize: 13)),
+                      ),
+                      DropdownMenuItem(
+                        value: ProblemCategory.multiplication2,
+                        child: Text('Perkalian II', style: TextStyle(fontSize: 13)),
+                      ),
+                    ],
+                    onChanged: (cat) {
+                      if (cat != null) {
+                        setState(() => _selectedCategory = cat);
+                        controller.startPracticeProblem(
+                          cat,
+                          _selectedDifficulty,
+                        );
+                      }
+                    },
+                  ),
+
+                  const SizedBox(width: 6),
+
+                  // Difficulty dropdown (compact)
+                  DropdownButton<Difficulty>(
+                    value: _selectedDifficulty,
+                    underline: const SizedBox.shrink(),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: SorobanTheme.textDark,
                     ),
-                    DropdownMenuItem(
-                      value: ProblemCategory.multiplication1,
-                      child: Text('Perkalian I', style: TextStyle(fontSize: 13)),
-                    ),
-                    DropdownMenuItem(
-                      value: ProblemCategory.multiplication2,
-                      child: Text('Perkalian II', style: TextStyle(fontSize: 13)),
-                    ),
-                  ],
-                  onChanged: (cat) {
-                    if (cat != null) {
-                      setState(() => _selectedCategory = cat);
-                      controller.startPracticeProblem(cat, _selectedDifficulty);
-                    }
-                  },
+                    items: const [
+                      DropdownMenuItem(
+                        value: Difficulty.easy,
+                        child: Text('Easy', style: TextStyle(fontSize: 13)),
+                      ),
+                      DropdownMenuItem(
+                        value: Difficulty.medium,
+                        child: Text('Medium', style: TextStyle(fontSize: 13)),
+                      ),
+                      DropdownMenuItem(
+                        value: Difficulty.hard,
+                        child: Text('Hard', style: TextStyle(fontSize: 13)),
+                      ),
+                    ],
+                    onChanged: (diff) {
+                      if (diff != null) {
+                        setState(() => _selectedDifficulty = diff);
+                        controller.startPracticeProblem(
+                          _selectedCategory,
+                          diff,
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // 3. Next problem + settings, pinned to the right edge. Settings
+          //    lands on the same right: 10.0 position as the challenge screen.
+          Positioned(
+            right: 10.0,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.skip_next_rounded, size: 28),
+                    tooltip: 'Soal Berikutnya',
+                    onPressed: () {
+                      controller.startPracticeProblem(
+                        _selectedCategory,
+                        _selectedDifficulty,
+                      );
+                    },
+                  ),
+
+                  IconButton(
+                    icon: const Icon(Icons.settings_outlined, size: 22),
+                    tooltip: 'Pengaturan',
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // 4. Equation band centred on the abacus FRAME centre — the same
+          //    helper the challenge screen uses, so both modes share one
+          //    source of truth for the centre. A long equation shrinks via
+          //    ProblemEquationText's FittedBox instead of moving its centre.
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) => Padding(
+                padding: EdgeInsets.only(
+                  left: ExerciseLayout.problemTextLeftFor(
+                    constraints.maxWidth,
+                  ),
+                  right: ExerciseLayout.problemTextRightInset,
                 ),
-
-                const SizedBox(width: 6),
-
-                // Difficulty dropdown (compact)
-                DropdownButton<Difficulty>(
-                  value: _selectedDifficulty,
-                  underline: const SizedBox.shrink(),
-                  style: const TextStyle(fontSize: 13, color: SorobanTheme.textDark),
-                  items: const [
-                    DropdownMenuItem(value: Difficulty.easy, child: Text('Easy', style: TextStyle(fontSize: 13))),
-                    DropdownMenuItem(value: Difficulty.medium, child: Text('Medium', style: TextStyle(fontSize: 13))),
-                    DropdownMenuItem(value: Difficulty.hard, child: Text('Hard', style: TextStyle(fontSize: 13))),
-                  ],
-                  onChanged: (diff) {
-                    if (diff != null) {
-                      setState(() => _selectedDifficulty = diff);
-                      controller.startPracticeProblem(_selectedCategory, diff);
-                    }
-                  },
+                child: Center(
+                  child: ProblemEquationText(
+                    controller: controller,
+                    textKey: const Key('practice_problem_text'),
+                  ),
                 ),
-
-                const SizedBox(width: 8),
-
-                // Problem Display (Outfit font with per-digit dimmed, matching Challenge)
-                if (problem != null)
-                  Expanded(child: _buildProblemText(controller))
-                else
-                  const Spacer(),
-
-                // Next problem button
-                IconButton(
-                  icon: const Icon(Icons.skip_next_rounded, size: 28),
-                  tooltip: 'Soal Berikutnya',
-                  onPressed: () {
-                    controller.startPracticeProblem(_selectedCategory, _selectedDifficulty);
-                  },
-                ),
-
-                // Settings button
-                IconButton(
-                  icon: const Icon(Icons.settings_outlined, size: 24),
-                  tooltip: 'Pengaturan',
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const SettingsScreen()),
-                    );
-                  },
-                ),
-              ],
+              ),
             ),
           ),
         ],
@@ -226,202 +290,116 @@ class _PracticeScreenState extends State<PracticeScreen> {
     );
   }
 
-  /// Displays the mathematical problem equation with dynamic font sizing
-  /// and faded visual feedback for completed checkpoint digits (identical to Challenge mode).
-  Widget _buildProblemText(SorobanController controller) {
+  /// Left panel with the practice controls, styled like the challenge
+  /// screen's left panel (fixed 56px column, badges, actions pinned low):
+  /// 1. Spacer pushes the controls to the bottom
+  /// 2. Bantuan button (primary)
+  /// 3. Putar Ulang button
+  /// 4. Reset button, same badge style as the challenge's Reset
+  Widget _buildLeftPanel(BuildContext context, SorobanController controller) {
+    const panelWidth = ExerciseLayout.leftPanelWidth;
     final problem = controller.currentProblem;
-    if (problem == null) return const SizedBox.shrink();
+    final hintEnabled = !controller.isAnimating &&
+        problem != null &&
+        controller.activeCheckpointIndex < problem.checkpoints.length;
 
-    final displayText = problem.displayText;
-    final length = displayText.length;
+    return SizedBox(
+      width: panelWidth,
+      child: Column(
+        children: [
+          const Spacer(),
 
-    // Dynamic font sizing based on equation length:
-    final double fontSize;
-    if (length <= 8) {
-      fontSize = 25.0;
-    } else if (length <= 14) {
-      fontSize = 22.0;
-    } else if (length <= 20) {
-      fontSize = 19.0;
-    } else {
-      fontSize = 17.0;
-    }
+          _buildControlButton(
+            width: panelWidth,
+            icon: Icons.lightbulb_rounded,
+            label: 'Bantuan',
+            tooltip: 'Bantuan: digit berikutnya',
+            isPrimary: true,
+            enabled: hintEnabled,
+            onPressed: () => controller.executeHint(),
+          ),
 
-    final activeCpIdx = controller.activeCheckpointIndex;
-    final textSpans = _buildProblemTextSpans(
-      problem: problem,
-      activeCheckpointIndex: activeCpIdx,
-      fontSize: fontSize,
-      controller: controller,
-    );
+          const SizedBox(height: 8),
 
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.center,
-      child: Text.rich(
-        TextSpan(
-          style: SorobanTheme.problemEquationStyle(fontSize: fontSize),
-          children: textSpans,
-        ),
-        textAlign: TextAlign.center,
+          _buildControlButton(
+            width: panelWidth,
+            icon: Icons.play_arrow_rounded,
+            label: 'Putar Ulang',
+            tooltip: 'Putar ulang animasi langkah digit ini',
+            enabled: !controller.isAnimating && controller.canReplay,
+            onPressed: () => controller.executeReplay(),
+          ),
+
+          const SizedBox(height: 8),
+
+          // 4. Reset button, pinned low like the challenge's Reset.
+          Padding(
+            padding: const EdgeInsets.only(bottom: 44.0),
+            child: _buildControlButton(
+              width: panelWidth,
+              icon: Icons.restart_alt_rounded,
+              label: 'Reset',
+              tooltip: 'Reset (Kembali ke checkpoint sebelumnya)',
+              enabled: controller.canReset,
+              onPressed: () => controller.executeReset(),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  List<InlineSpan> _buildProblemTextSpans({
-    required Problem problem,
-    required int activeCheckpointIndex,
-    required double fontSize,
-    required SorobanController controller,
-  }) {
-    final spans = <InlineSpan>[];
-
-    if (problem.category == ProblemCategory.multiplication1 ||
-        problem.category == ProblemCategory.multiplication2) {
-      if (problem.terms.length >= 2) {
-        // Multiplicand (term 0)
-        final aStr = problem.terms[0].abs().toString();
-        for (int d = 0; d < aStr.length; d++) {
-          final isDone = _isDigitCompleted(
-            problem: problem,
-            controller: controller,
-            activeCheckpointIndex: activeCheckpointIndex,
-            termIndex: 0,
-            digitIndex: d,
-          );
-          spans.add(TextSpan(
-            text: aStr[d],
-            style: isDone
-                ? SorobanTheme.problemEquationCompletedStyle(fontSize: fontSize)
-                : SorobanTheme.problemEquationStyle(fontSize: fontSize),
-          ));
-        }
-
-        // Operator
-        spans.add(TextSpan(
-          text: ' × ',
-          style: SorobanTheme.problemEquationStyle(fontSize: fontSize),
-        ));
-
-        // Multiplier (term 1)
-        final bStr = problem.terms[1].abs().toString();
-        for (int d = 0; d < bStr.length; d++) {
-          final isDone = _isDigitCompleted(
-            problem: problem,
-            controller: controller,
-            activeCheckpointIndex: activeCheckpointIndex,
-            termIndex: 1,
-            digitIndex: d,
-          );
-          spans.add(TextSpan(
-            text: bStr[d],
-            style: isDone
-                ? SorobanTheme.problemEquationCompletedStyle(fontSize: fontSize)
-                : SorobanTheme.problemEquationStyle(fontSize: fontSize),
-          ));
-        }
-      }
-      return spans;
-    }
-
-    // Addition & Mixed: terms separated by operators
-    for (int t = 0; t < problem.terms.length; t++) {
-      if (t > 0 && t - 1 < problem.operators.length) {
-        spans.add(TextSpan(
-          text: ' ${problem.operators[t - 1]} ',
-          style: SorobanTheme.problemEquationStyle(fontSize: fontSize),
-        ));
-      }
-
-      final termStr = problem.terms[t].abs().toString();
-      for (int d = 0; d < termStr.length; d++) {
-        final isDone = _isDigitCompleted(
-          problem: problem,
-          controller: controller,
-          activeCheckpointIndex: activeCheckpointIndex,
-          termIndex: t,
-          digitIndex: d,
-        );
-        spans.add(TextSpan(
-          text: termStr[d],
-          style: isDone
-              ? SorobanTheme.problemEquationCompletedStyle(fontSize: fontSize)
-              : SorobanTheme.problemEquationStyle(fontSize: fontSize),
-        ));
-      }
-    }
-
-    return spans;
-  }
-
-  bool _isDigitCompleted({
-    required Problem problem,
-    required SorobanController controller,
-    required int activeCheckpointIndex,
-    required int termIndex,
-    required int digitIndex,
-  }) {
-    if (activeCheckpointIndex <= 0) {
-      return false;
-    }
-    if (activeCheckpointIndex >= problem.checkpoints.length) {
-      return true;
-    }
-
-    if (problem.category == ProblemCategory.multiplication1 ||
-        problem.category == ProblemCategory.multiplication2) {
-      // Which contributions the board holds is the controller's call, not a
-      // position in the canonical chain: the user may have worked in any order.
-      return controller.isMultiplicationDigitCompleted(
-        termIndex: termIndex,
-        digitIndex: digitIndex,
-      );
-    }
-
-    // Addition & Mixed:
-    // 1. Direct match with any completed checkpoint:
-    for (int k = 0; k < activeCheckpointIndex; k++) {
-      final cp = problem.checkpoints[k];
-      if (cp.termIndex == termIndex && cp.digitIndex == digitIndex) {
-        return true;
-      }
-    }
-
-    // 2. If this digit didn't generate a checkpoint (e.g. '0'):
-    final lastCompleted = problem.checkpoints[activeCheckpointIndex - 1];
-    if (lastCompleted.termIndex > termIndex) return true;
-    if (lastCompleted.termIndex == termIndex && lastCompleted.digitIndex > digitIndex) {
-      return true;
-    }
-
-    return false;
-  }
-
+  /// Compact icon+label control badge for the practice left panel, matching
+  /// the challenge screen's Reset button style (rounded 8px, full panel
+  /// width, icon over label).
   Widget _buildControlButton({
+    required double width,
     required IconData icon,
+    required String label,
     required String tooltip,
     required bool enabled,
     required VoidCallback onPressed,
     bool isPrimary = false,
   }) {
+    final baseColor = isPrimary
+        ? SorobanTheme.beadActiveColor
+        : SorobanTheme.frameColor;
     return Tooltip(
       message: tooltip,
       waitDuration: const Duration(milliseconds: 300),
       child: Material(
-        color: isPrimary
-            ? (enabled ? SorobanTheme.beadActiveColor : Colors.grey.shade400)
-            : (enabled ? SorobanTheme.frameColor : Colors.grey.shade400),
-        borderRadius: BorderRadius.circular(18),
+        color: enabled ? baseColor : Colors.grey.shade400,
+        borderRadius: BorderRadius.circular(8),
         elevation: enabled ? (isPrimary ? 2 : 1) : 0,
         child: InkWell(
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(8),
           onTap: enabled ? onPressed : null,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            child: Icon(
-              icon,
-              size: 18,
-              color: isPrimary ? SorobanTheme.frameColor : SorobanTheme.backgroundColor,
+          child: Container(
+            width: width,
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            alignment: Alignment.center,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 18,
+                  color: isPrimary
+                      ? SorobanTheme.frameColor
+                      : SorobanTheme.backgroundColor,
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: isPrimary
+                        ? SorobanTheme.frameColor
+                        : SorobanTheme.backgroundColor,
+                  ),
+                ),
+              ],
             ),
           ),
         ),
