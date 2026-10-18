@@ -163,19 +163,38 @@ class _PracticeScreenState extends State<PracticeScreen> {
                     items: const [
                       DropdownMenuItem(
                         value: ProblemCategory.addition,
-                        child: Text('Penjumlahan', style: TextStyle(fontSize: 13)),
+                        child:
+                            Text('Penjumlahan', style: TextStyle(fontSize: 13)),
                       ),
                       DropdownMenuItem(
                         value: ProblemCategory.mixed,
-                        child: Text('Campuran (+/-)', style: TextStyle(fontSize: 13)),
+                        child: Text('Campuran (+/-)',
+                            style: TextStyle(fontSize: 13)),
                       ),
                       DropdownMenuItem(
                         value: ProblemCategory.multiplication1,
-                        child: Text('Perkalian I', style: TextStyle(fontSize: 13)),
+                        child:
+                            Text('Perkalian I', style: TextStyle(fontSize: 13)),
                       ),
                       DropdownMenuItem(
                         value: ProblemCategory.multiplication2,
-                        child: Text('Perkalian II', style: TextStyle(fontSize: 13)),
+                        child: Text('Perkalian II',
+                            style: TextStyle(fontSize: 13)),
+                      ),
+                      DropdownMenuItem(
+                        value: ProblemCategory.division1,
+                        child:
+                            Text('Pembagian I', style: TextStyle(fontSize: 13)),
+                      ),
+                      DropdownMenuItem(
+                        value: ProblemCategory.division2,
+                        child: Text('Pembagian II',
+                            style: TextStyle(fontSize: 13)),
+                      ),
+                      DropdownMenuItem(
+                        value: ProblemCategory.divisionDecimal,
+                        child: Text('Pembagian Desimal',
+                            style: TextStyle(fontSize: 13)),
                       ),
                     ],
                     onChanged: (cat) {
@@ -248,13 +267,13 @@ class _PracticeScreenState extends State<PracticeScreen> {
                       );
                     },
                   ),
-
                   IconButton(
                     icon: const Icon(Icons.settings_outlined, size: 22),
                     tooltip: 'Pengaturan',
                     onPressed: () {
                       Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                        MaterialPageRoute(
+                            builder: (_) => const SettingsScreen()),
                       );
                     },
                   ),
@@ -313,7 +332,9 @@ class _PracticeScreenState extends State<PracticeScreen> {
             width: panelWidth,
             icon: Icons.lightbulb_rounded,
             label: 'Bantuan',
-            tooltip: 'Bantuan: digit berikutnya',
+            tooltip: problem?.division == null
+                ? 'Bantuan: digit berikutnya'
+                : 'Bantuan: langkah pembagian berikutnya',
             isPrimary: true,
             enabled: hintEnabled,
             onPressed: () => controller.executeHint(),
@@ -361,9 +382,8 @@ class _PracticeScreenState extends State<PracticeScreen> {
     required VoidCallback onPressed,
     bool isPrimary = false,
   }) {
-    final baseColor = isPrimary
-        ? SorobanTheme.beadActiveColor
-        : SorobanTheme.frameColor;
+    final baseColor =
+        isPrimary ? SorobanTheme.beadActiveColor : SorobanTheme.frameColor;
     return Tooltip(
       message: tooltip,
       waitDuration: const Duration(milliseconds: 300),

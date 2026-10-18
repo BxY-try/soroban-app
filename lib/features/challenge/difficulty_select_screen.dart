@@ -26,7 +26,8 @@ class DifficultySelectScreen extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: SorobanTheme.frameColor),
+          icon: const Icon(Icons.arrow_back_rounded,
+              color: SorobanTheme.frameColor),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
@@ -113,7 +114,8 @@ class DifficultySelectScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(20),
@@ -141,7 +143,8 @@ class DifficultySelectScreen extends StatelessWidget {
               const Spacer(),
               // Best record section
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: SorobanTheme.backgroundColor,
                   borderRadius: BorderRadius.circular(8),
@@ -149,7 +152,8 @@ class DifficultySelectScreen extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.emoji_events_outlined, size: 18, color: SorobanTheme.beadActiveColor),
+                    const Icon(Icons.emoji_events_outlined,
+                        size: 18, color: SorobanTheme.beadActiveColor),
                     const SizedBox(width: 6),
                     Text(
                       bestTimeMs != null
@@ -180,7 +184,8 @@ class DifficultySelectScreen extends StatelessWidget {
                     MaterialPageRoute(builder: (_) => const ChallengeScreen()),
                   );
                 },
-                child: const Text('Mulai (5 Soal)', style: TextStyle(fontWeight: FontWeight.bold)),
+                child: const Text('Mulai (5 Soal)',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -195,6 +200,9 @@ class DifficultySelectScreen extends StatelessWidget {
       ProblemCategory.mixed => 'Campuran (+ / -)',
       ProblemCategory.multiplication1 => 'Perkalian I (1 Digit)',
       ProblemCategory.multiplication2 => 'Perkalian II (2 Digit)',
+      ProblemCategory.division1 => 'Pembagian I (1 Digit)',
+      ProblemCategory.division2 => 'Pembagian II (2 Digit)',
+      ProblemCategory.divisionDecimal => 'Pembagian Desimal',
     };
   }
 
@@ -206,9 +214,12 @@ class DifficultySelectScreen extends StatelessWidget {
           Difficulty.hard => '4 suku × 4 digit\n(Contoh: 1824 + 4091 + ...)',
         },
       ProblemCategory.mixed => switch (diff) {
-          Difficulty.easy => '3 suku × 2 digit (+ / -)\nRunning total anti-negatif',
-          Difficulty.medium => '3 suku × 3 digit (+ / -)\nRunning total anti-negatif',
-          Difficulty.hard => '4 suku × 4 digit (+ / -)\nKombinasi acak simpan/pinjam',
+          Difficulty.easy =>
+            '3 suku × 2 digit (+ / -)\nRunning total anti-negatif',
+          Difficulty.medium =>
+            '3 suku × 3 digit (+ / -)\nRunning total anti-negatif',
+          Difficulty.hard =>
+            '4 suku × 4 digit (+ / -)\nKombinasi acak simpan/pinjam',
         },
       ProblemCategory.multiplication1 => switch (diff) {
           Difficulty.easy => '3 digit × 1 digit\n(Contoh: 482 × 6)',
@@ -218,9 +229,24 @@ class DifficultySelectScreen extends StatelessWidget {
       ProblemCategory.multiplication2 => switch (diff) {
           Difficulty.easy => '4 digit × 2 digit\n(Contoh: 2841 × 23)',
           Difficulty.medium => '5 digit × 2 digit\n(Contoh: 38291 × 45)',
-          Difficulty.hard => '5 digit × 2 digit (Carry-heavy)\n(Banyak simpanan beruntun)',
+          Difficulty.hard =>
+            '5 digit × 2 digit (Carry-heavy)\n(Banyak simpanan beruntun)',
+        },
+      ProblemCategory.division1 => switch (diff) {
+          Difficulty.easy => '2 digit ÷ 1 digit\nHasil bulat · 5 tiang',
+          Difficulty.medium => '3 digit ÷ 1 digit\nHasil bulat · 7 tiang',
+          Difficulty.hard => '4 digit ÷ 1 digit\nHasil bulat · 9 tiang',
+        },
+      ProblemCategory.division2 => switch (diff) {
+          Difficulty.easy => '3 digit ÷ 2 digit\nKepala–ekor · 6 tiang',
+          Difficulty.medium => '4 digit ÷ 2 digit\nKepala–ekor · 8 tiang',
+          Difficulty.hard => '5 digit ÷ 2 digit\nKepala–ekor · 10 tiang',
+        },
+      ProblemCategory.divisionDecimal => switch (diff) {
+          Difficulty.easy => '2 digit ÷ 1 digit\n1 angka desimal · 7 tiang',
+          Difficulty.medium => '3 digit ÷ 2 digit\n2 angka desimal · 10 tiang',
+          Difficulty.hard => '3 digit ÷ 2 digit\n3 angka desimal · 12 tiang',
         },
     };
   }
-
 }

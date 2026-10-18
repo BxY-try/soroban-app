@@ -77,6 +77,18 @@ class ProblemEquationText extends StatelessWidget {
   }) {
     final spans = <InlineSpan>[];
 
+    if (problem.division != null) {
+      final complete = activeCheckpointIndex >= problem.checkpoints.length;
+      return [
+        TextSpan(
+          text: problem.displayText,
+          style: complete
+              ? SorobanTheme.problemEquationCompletedStyle(fontSize: fontSize)
+              : SorobanTheme.problemEquationStyle(fontSize: fontSize),
+        )
+      ];
+    }
+
     if (problem.category == ProblemCategory.multiplication1 ||
         problem.category == ProblemCategory.multiplication2) {
       if (problem.terms.length >= 2) {
@@ -191,7 +203,8 @@ class ProblemEquationText extends StatelessWidget {
     // 2. If this digit didn't generate a checkpoint (e.g. '0'):
     final lastCompleted = problem.checkpoints[activeCheckpointIndex - 1];
     if (lastCompleted.termIndex > termIndex) return true;
-    if (lastCompleted.termIndex == termIndex && lastCompleted.digitIndex > digitIndex) {
+    if (lastCompleted.termIndex == termIndex &&
+        lastCompleted.digitIndex > digitIndex) {
       return true;
     }
 

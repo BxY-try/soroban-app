@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../engine/addition_engine.dart';
+import '../engine/division_engine.dart';
 import '../engine/hint_engine.dart';
 import '../engine/multiplication_progress.dart';
 import '../engine/problem_generator.dart';
@@ -50,6 +51,9 @@ class SorobanController extends ChangeNotifier {
   // --- Active Problem & Session ---
   Problem? _currentProblem;
   Problem? get currentProblem => _currentProblem;
+
+  String? _divisionExplanation;
+  String? get divisionExplanation => _divisionExplanation;
 
   List<Problem> _challengeProblems = [];
   int _challengeIndex = 0;
@@ -326,7 +330,7 @@ class SorobanController extends ChangeNotifier {
     final problem = problemGenerator.generateProblem(
       category: category,
       difficulty: difficulty,
-      rodCount: _state.rods.length,
+      rodCount: 7,
     );
     // A problem this board cannot play is refused here, before anything has
     // changed: the previous problem stays exactly as it was and the error
@@ -351,7 +355,7 @@ class SorobanController extends ChangeNotifier {
     final problems = problemGenerator.generateChallengeSession(
       category: category,
       difficulty: difficulty,
-      rodCount: _state.rods.length,
+      rodCount: 7,
       count: 5,
     );
     // All of them, now. The later ones are only reached after a delay, from a
@@ -395,9 +399,15 @@ class SorobanController extends ChangeNotifier {
 
   void _resetToNewProblem() {
     _problemEpoch++;
-    _state = SorobanState.zero();
+    final division = _currentProblem?.division;
+    _state = division == null
+        ? SorobanState.zero()
+        : SorobanState.fromValue(
+            division.initialValue,
+            rodCount: division.layout.rodCount,
+          );
     _checkpointSnapshots.clear();
-    _checkpointSnapshots.add(SorobanState.zero());
+    _checkpointSnapshots.add(_state.clone());
     _activeCheckpointIndex = 0;
     _trailBeads.clear();
     // A new problem must never inherit a lock or a glow from an animation
@@ -407,6 +417,7 @@ class SorobanController extends ChangeNotifier {
     _lastHint = null;
     _creditedContributions = <int>[];
     _lastMultiplicationHint = null;
+    _divisionExplanation = division?.introduction;
     final problem = _currentProblem;
     _multiplication = problem == null ? null : _progressFor(problem);
     notifyListeners();
@@ -422,8 +433,10 @@ class SorobanController extends ChangeNotifier {
   /// [currentProblem]. Behind it, "every contribution is credited", "the board
   /// shows the product" and "the chain is complete" are the same fact, so a
   /// problem can never be reported solved at a board that is not its answer.
-  MultiplicationProgress? _progressFor(Problem problem) =>
-      MultiplicationProgress.forProblem(problem, rodCount: _state.rods.length);
+  MultiplicationProgress? _progressFor(Problem problem) {
+    const DivisionEngine().validateProblem(problem);
+    return MultiplicationProgress.forProblem(problem, rodCount: 7);
+  }
 
   // --- Manual Bead Gestures ---
   //
@@ -550,6 +563,9 @@ class SorobanController extends ChangeNotifier {
     if (matched < 0) return;
 
     _recordProgressThrough(matched);
+    if (problem.division != null) {
+      _divisionExplanation = checkpoints[matched].description;
+    }
     if (_activeCheckpointIndex >= checkpoints.length) {
       _handleProblemCompleted();
     }
@@ -624,7 +640,8 @@ class SorobanController extends ChangeNotifier {
     if (explained == null) return;
 
     final credited = _creditedContributions.toSet();
-    if (explained.length == credited.length && explained.containsAll(credited)) {
+    if (explained.length == credited.length &&
+        explained.containsAll(credited)) {
       return;
     }
 
@@ -739,13 +756,15 @@ class SorobanController extends ChangeNotifier {
     final problem = _currentProblem;
     if (problem == null) return;
     unawaited(
-      recordTimeIfBest(problem.category, problem.difficulty, _elapsedMilliseconds)
+      recordTimeIfBest(
+              problem.category, problem.difficulty, _elapsedMilliseconds)
           .catchError((Object _) => false),
     );
   }
 
   bool get canReset =>
-      !_isAnimating && (_activeCheckpointIndex > 0 || _state.value != 0);
+      !_isAnimating &&
+      (_activeCheckpointIndex > 0 || _state != _checkpointSnapshots.first);
 
   /// Number of entries in the checkpoint snapshot chain.
   ///
@@ -772,8 +791,7 @@ class SorobanController extends ChangeNotifier {
           _activeCheckpointIndex == hint.baseOrder.length + 1;
     }
     final hint = _lastHint;
-    return hint != null &&
-        _activeCheckpointIndex == hint.checkpointIndex + 1;
+    return hint != null && _activeCheckpointIndex == hint.checkpointIndex + 1;
   }
 
   // --- Hint Execution (Chained Animation) ---
@@ -800,6 +818,9 @@ class SorobanController extends ChangeNotifier {
     _clackPending = false;
     _isAnimating = true;
     try {
+      if (problem.division != null) {
+        _divisionExplanation = hintResult.checkpoint.description;
+      }
       notifyListeners();
 
       // If recovering from divergence, restore valid snapshot gradually rod-by-rod
@@ -861,6 +882,9 @@ class SorobanController extends ChangeNotifier {
     _clackPending = false;
     _isAnimating = true;
     try {
+      if (_currentProblem?.division != null) {
+        _divisionExplanation = hint.checkpoint.description;
+      }
       // 1. Rollback to the board the hinted digit started at. Beads the user
       //    moved partially since are undone with it — accepted by design:
       //    Replay exists to re-watch the animation, not to preserve edits
@@ -991,6 +1015,7 @@ class SorobanController extends ChangeNotifier {
     // 1. Jika manik telah digerakkan dan tidak sama dengan snapshot awal digit aktif:
     if (_state.value != _checkpointSnapshots.last.value) {
       _state = _checkpointSnapshots.last.clone();
+      _restoreDivisionExplanation();
       _trailBeads.clear();
       _animatingBeadKey = null;
       notifyListeners();
@@ -1007,6 +1032,7 @@ class SorobanController extends ChangeNotifier {
         _creditedContributions.removeLast();
       }
       _state = _checkpointSnapshots.last.clone();
+      _restoreDivisionExplanation();
       _trailBeads.clear();
       _animatingBeadKey = null;
       // The stored hints are NOT cleared here: canReplay is derived from
@@ -1016,6 +1042,14 @@ class SorobanController extends ChangeNotifier {
       // keeps Replay available — the board really is where the hint left it.
       notifyListeners();
     }
+  }
+
+  void _restoreDivisionExplanation() {
+    final problem = _currentProblem;
+    if (problem?.division == null) return;
+    _divisionExplanation = _activeCheckpointIndex == 0
+        ? problem!.division!.introduction
+        : problem!.checkpoints[_activeCheckpointIndex - 1].description;
   }
 
   /// Smoothly recovers from divergence by restoring each divergent rod one-by-one

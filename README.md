@@ -10,7 +10,7 @@ Berdiri di atas `ChangeNotifier` + `provider`, dengan seluruh perhitungan mekani
 
 | Fitur | Penjelasan |
 |---|---|
-| **Sempoa 7 tiang interaktif** | Setiap tiang punya 1 manik langit (nilai 5) dan 4 manik bumi (nilai 1). Tiap jari/pointer diklaim satu tiang sampai terangkat, sehingga beberapa tiang bisa digeser bersamaan (**multi-touch**). |
+| **Sempoa interaktif** | Papan dasar 7 tiang; pembagian memakai 5–12 tiang sesuai kategori dan level. Setiap tiang punya 1 manik langit (nilai 5) dan 4 manik bumi (nilai 1). Tiap jari/pointer diklaim satu tiang sampai terangkat, sehingga beberapa tiang bisa digeser bersamaan (**multi-touch**). |
 | **Dua jari pada satu tiang** | Sentuhan pada beam (14 px di tengah papan) tidak diabaikan: ia diarahkan ke tiang terdekat, ke sisi beam yang paling dekat, dan ke deck yang masih bebas bila deck terdekat sedang dipegang — persis teknik soroban asli (jari telunjuk di manik langit, jempol di manik bumi). Batas ini hanya berlaku di beam: menafsirkan ulang sentuhan pada manik akan membuat tap biasa membalik manik langit di mode Klik Manik. |
 | **Manik mengikuti jari dari piksel pertama** | Ambang drag hanya **1 px** (bukan `kTouchSlop` 18 px yang itu ambang tap-vs-scroll). Di layar 800×360 seluruh perjalanan satu manik hanya ~16 px, jadi flick pendek lama tidak pernah terekam sama sekali. |
 | **Fisika manik 1D rigid-body** | Saat digeser, manik yang "`mendorong`" manik di atas/bawahnya ikut terdorong, dengan jarak minimum sebesar `beadPitch` dan clamp di batas beam serta bingkai. |
@@ -49,7 +49,37 @@ Perkalian dipecah menjadi partial product, lalu **100% didelegasikan** move mani
 
 ## Konsep Inti
 
-**Model data.** `SorobanState` adalah daftar 7 `Rod` (indeks 0 = satuan/kanan). Karena `SorobanState.value` meng-encode seluruh tiang, kecocokan nilai_board == nilai_target berarti papan persis posisi yang dimaksud checkpoint itu — tidak ada yang perlu diverifikasi ulang.
+**Pembagian.** Kategori `Pembagian I`, `Pembagian II`, dan `Pembagian Desimal`
+masing-masing memiliki Easy/Medium/Hard, lima soal per challenge, serta rekor
+waktunya sendiri. Practice memakai kategori dan difficulty yang sama, dengan
+Bantuan per langkah, penjelasan nilai tempat, Putar Ulang bantuan terakhir,
+dan Reset ke posisi valid sebelumnya.
+
+| Kategori | Easy | Medium | Hard |
+|---|---|---|---|
+| Pembagian I | 2 digit ÷ 1 digit, 5 tiang | 3 digit ÷ 1 digit, 7 tiang | 4 digit ÷ 1 digit, 9 tiang |
+| Pembagian II | 3 digit ÷ 2 digit, 6 tiang | 4 digit ÷ 2 digit, 8 tiang | 5 digit ÷ 2 digit, 10 tiang |
+| Pembagian Desimal | 2 digit ÷ 1 digit, 1 desimal, 7 tiang | 3 digit ÷ 2 digit, 2 desimal, 10 tiang | 3 digit ÷ 2 digit, 3 desimal, 12 tiang |
+
+Kapasitas papan pembagian tetap per kategori/difficulty, termasuk satu tiang
+kosong antara soal/sisa di kiri dan hasil di kanan. Semua tiang disiapkan sejak
+awal; kapasitas tidak dihitung dari panjang jawaban. Tidak ada garis sekat
+tambahan pada papan. Label nilai tempat dan ringkasan kedua area berada di
+luar bingkai. Soal sudah terpasang di area kiri saat mulai. Pembagi ditampilkan
+dalam persamaan, bukan disimpan pada tiang tersendiri.
+
+`DivisionEngine` memakai fixed-point integer di kedua area: contohnya sisa
+`0,600` tetap bernilai `0,600`, tanpa perubahan arti tiang saat melewati koma.
+Soal desimal selalu berhenti tepat pada presisi levelnya; tidak ada pembulatan
+atau desimal berulang. Satu langkah menulis digit hasil, lalu langkah berikutnya
+mengurangi produk pembagi (atau kepala dan ekornya). Semua gerakan fisik memakai
+`AdditionEngine`. Digit nol dan ekor nol tidak menghasilkan checkpoint kosong.
+Soal selesai ketika area sisa dan tiang kosong bernilai nol serta area hasil
+berisi hasil yang tepat. Snapshot awal menyimpan soal yang sudah terpasang;
+Hint, Replay, Reset, dan penggantian soal memakai pengamanan epoch yang sama
+dengan operasi lain.
+
+**Model data.** `SorobanState` adalah daftar `Rod` (default 7, indeks 0 di kanan; nilai tempat tiap area pembagian ditentukan `DivisionLayout`). Karena `SorobanState.value` meng-encode seluruh tiang, kecocokan nilai_board == nilai_target berarti papan persis posisi yang dimaksud checkpoint itu — tidak ada yang perlu diverifikasi ulang.
 
 **Kawan kecil / kawan besar.** `AdditionEngine` menghitung gerakan atomik `BeadMove` untuk satu digit memakai teknik asli sempoa: gerakan langsung, komplemen 5 (kawan kecil), dan komplemen 10 (kawan besar) dengan carry/borrow — termasuk ripple beruntun lintas tiang seperti `999 + 1 = 1000`.
 

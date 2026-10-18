@@ -109,6 +109,7 @@ class _SorobanViewState extends State<SorobanView>
 
   bool _lastPerRodColor = false;
   String? _lastAnimatingKey;
+  Object? _lastProblem;
 
   /// True while this view is committing a drag to the controller. That change
   /// already happened on screen (the finger showed it), so it must not slide.
@@ -158,6 +159,7 @@ class _SorobanViewState extends State<SorobanView>
     _targetState = controller.state;
     _lastPerRodColor = controller.perRodColor;
     _lastAnimatingKey = controller.animatingBeadKey;
+    _lastProblem = controller.currentProblem;
   }
 
   @override
@@ -202,7 +204,21 @@ class _SorobanViewState extends State<SorobanView>
       return;
     }
 
-    var changed = false;
+    final replaced = !identical(_lastProblem, controller.currentProblem);
+    var changed = replaced;
+    if (replaced) {
+      _lastProblem = controller.currentProblem;
+      // A different board can have a different rod count. Old fingers and
+      // interpolation targets must never address the new board's rods.
+      _sessions.clear();
+      _ghosts.clear();
+      _settleTicker.stop();
+      _slide.stop();
+      _previousState = controller.state;
+      _targetState = controller.state;
+      _layout = null;
+      setState(() {});
+    }
 
     final newState = controller.state;
     if (_targetState == null || newState != _targetState) {
@@ -396,6 +412,8 @@ class _SorobanViewState extends State<SorobanView>
         Expanded(child: abacus),
         const SizedBox(height: 6),
         _buildDigitalReadout(),
+        if (_controller!.currentProblem?.division != null)
+          _buildDivisionGuide(),
       ],
     );
   }
@@ -487,6 +505,7 @@ class _SorobanViewState extends State<SorobanView>
       builder: (context, _) {
         final state = _controller!.state;
         final totalRods = state.rods.length;
+        final division = _controller!.currentProblem?.division;
 
         // The readout Row is laid out on its own so it can use the same
         // available width the abacus got. Padding both sides by the matching
@@ -508,47 +527,121 @@ class _SorobanViewState extends State<SorobanView>
                   final hasValue = rodValue > 0;
 
                   return Expanded(
-                    child: Center(
-                      child: Container(
-                        constraints: const BoxConstraints(
-                          minWidth: 28,
-                          maxWidth: 36,
-                          minHeight: 26,
-                          maxHeight: 28,
-                        ),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: hasValue
-                              ? SorobanTheme.frameColor.withValues(alpha: 0.10)
-                              : SorobanTheme.frameColor.withValues(alpha: 0.04),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: hasValue
-                                ? SorobanTheme.frameColor.withValues(alpha: 0.28)
-                                : SorobanTheme.frameColor.withValues(alpha: 0.12),
-                            width: 1.0,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Center(
+                            child: Container(
+                          constraints: const BoxConstraints(
+                            minWidth: 28,
+                            maxWidth: 36,
+                            minHeight: 26,
+                            maxHeight: 28,
                           ),
-                        ),
-                        child: Text(
-                          '$rodValue',
-                          style: TextStyle(
-                            fontFamily: 'Courier',
-                            fontFeatures: const [FontFeature.tabularFigures()],
-                            fontSize: 16,
-                            fontWeight:
-                                hasValue ? FontWeight.bold : FontWeight.w500,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
                             color: hasValue
-                                ? SorobanTheme.textDark
-                                : SorobanTheme.textMuted,
+                                ? SorobanTheme.frameColor
+                                    .withValues(alpha: 0.10)
+                                : SorobanTheme.frameColor
+                                    .withValues(alpha: 0.04),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: hasValue
+                                  ? SorobanTheme.frameColor
+                                      .withValues(alpha: 0.28)
+                                  : SorobanTheme.frameColor
+                                      .withValues(alpha: 0.12),
+                              width: 1.0,
+                            ),
                           ),
-                        ),
-                      ),
+                          child: Text(
+                            '$rodValue',
+                            style: TextStyle(
+                              fontFamily: 'Courier',
+                              fontFeatures: const [
+                                FontFeature.tabularFigures()
+                              ],
+                              fontSize: 16,
+                              fontWeight:
+                                  hasValue ? FontWeight.bold : FontWeight.w500,
+                              color: hasValue
+                                  ? SorobanTheme.textDark
+                                  : SorobanTheme.textMuted,
+                            ),
+                          ),
+                        )),
+                        if (division != null)
+                          SizedBox(
+                            height: 17,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                rodIndex == division.layout.workUnitsRod
+                                    ? 'Sisa · 1'
+                                    : rodIndex == division.layout.resultUnitsRod
+                                        ? 'Hasil · 1'
+                                        : division.layout.rodLabel(rodIndex),
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  color: SorobanTheme.textMuted,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   );
                 }),
               ),
             );
           },
+        );
+      },
+    );
+  }
+
+  Widget _buildDivisionGuide() {
+    return ListenableBuilder(
+      listenable: _controller!,
+      builder: (context, _) {
+        final controller = _controller!;
+        final problem = controller.currentProblem;
+        final division = problem?.division;
+        if (division == null) return const SizedBox.shrink();
+        final layout = division.layout;
+        final solved =
+            controller.activeCheckpointIndex >= problem!.checkpoints.length;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 3, 12, 0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  'Kiri · soal/sisa ${layout.format(layout.workValue(controller.state.value))}'
+                  '     Kanan · hasil ${layout.format(layout.quotientValue(controller.state.value))}',
+                  key: const Key('division_area_values'),
+                  style: const TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+              ),
+              if (!controller.isChallengeMode)
+                Text(
+                  solved
+                      ? 'Sisa habis. Hasil: ${layout.format(problem.expectedResult)}. '
+                          'Putar Ulang mengulang bantuan terakhir; Reset mundur satu langkah.'
+                      : controller.divisionExplanation ?? division.introduction,
+                  key: const Key('division_guide'),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 11, height: 1.2, color: SorobanTheme.textMuted),
+                ),
+            ],
+          ),
         );
       },
     );

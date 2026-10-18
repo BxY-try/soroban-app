@@ -1,4 +1,5 @@
 import 'bead_move.dart';
+import 'division_exercise.dart';
 
 /// Categories of mathematical operations supported by the app.
 enum ProblemCategory {
@@ -13,6 +14,22 @@ enum ProblemCategory {
 
   /// Multiplication with a 2-digit multiplier.
   multiplication2,
+
+  /// One-digit divisor, exact integer quotient.
+  division1,
+
+  /// Two-digit divisor, exact integer quotient.
+  division2,
+
+  /// Integer operands with an exact terminating decimal quotient.
+  divisionDecimal,
+}
+
+extension ProblemCategoryDivision on ProblemCategory {
+  bool get isDivision =>
+      this == ProblemCategory.division1 ||
+      this == ProblemCategory.division2 ||
+      this == ProblemCategory.divisionDecimal;
 }
 
 /// Difficulty levels.
@@ -44,6 +61,9 @@ class DigitCheckpoint {
   /// Sequence of physical finger flick moves executing this full digit.
   final List<BeadMove> atomicMoves;
 
+  /// Explanation of the whole operation, rather than an individual flick.
+  final String? description;
+
   const DigitCheckpoint({
     required this.targetValue,
     required this.previousValue,
@@ -51,6 +71,7 @@ class DigitCheckpoint {
     required this.digitIndex,
     required this.rodIndex,
     required this.atomicMoves,
+    this.description,
   });
 
   @override
@@ -69,10 +90,14 @@ class Problem {
   /// Operators between terms (e.g. ['+', '+'] or ['+', '-'] or ['x']).
   final List<String> operators;
 
-  /// Final mathematical answer.
+  /// Final answer. For division this is an exact fixed-point integer, with
+  /// [division.layout.decimalPlaces] digits after the decimal point.
   final int expectedResult;
 
-  /// Precomputed digit-group checkpoints from start (0) to finish.
+  final DivisionExercise? division;
+
+  /// Precomputed digit-group checkpoints. Division starts with the dividend
+  /// already on the work area; other operations start on an empty board.
   final List<DigitCheckpoint> checkpoints;
 
   const Problem({
@@ -82,11 +107,15 @@ class Problem {
     required this.operators,
     required this.expectedResult,
     required this.checkpoints,
+    this.division,
   });
 
   /// Formatted equation for display, e.g. "17823 + 23094" or "432 × 7".
   String get displayText {
     if (terms.isEmpty) return '';
+    if (category.isDivision && terms.length >= 2) {
+      return '${terms[0]} ÷ ${terms[1]}';
+    }
     if (category == ProblemCategory.multiplication1 ||
         category == ProblemCategory.multiplication2) {
       return '${terms[0]} × ${terms[1]}';

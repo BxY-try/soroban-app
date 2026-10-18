@@ -46,7 +46,8 @@ class ModeSelectScreen extends StatelessWidget {
                             vertical: 10,
                           ),
                         ),
-                        icon: const Icon(Icons.fitness_center_rounded, size: 20),
+                        icon:
+                            const Icon(Icons.fitness_center_rounded, size: 20),
                         label: const Text('Mode Practice'),
                         onPressed: () {
                           Navigator.of(context).push(
@@ -89,7 +90,7 @@ class ModeSelectScreen extends StatelessWidget {
 
               const SizedBox(height: 16),
 
-              // 4 Category Cards in responsive grid
+              // Category cards scroll as the exercise library grows.
               Expanded(
                 child: GridView.count(
                   crossAxisCount: 2,
@@ -100,7 +101,8 @@ class ModeSelectScreen extends StatelessWidget {
                     _buildModeCard(
                       context,
                       title: 'Penjumlahan',
-                      subtitle: 'Latihan dasar manik bumi, langit, dan kawan kecil/besar (+)',
+                      subtitle:
+                          'Latihan dasar manik bumi, langit, dan kawan kecil/besar (+)',
                       icon: Icons.add_circle_outline_rounded,
                       category: ProblemCategory.addition,
                       accentColor: const Color(0xFF5A7247),
@@ -108,7 +110,8 @@ class ModeSelectScreen extends StatelessWidget {
                     _buildModeCard(
                       context,
                       title: 'Campuran (+ / -)',
-                      subtitle: 'Kombinasi penjumlahan & pengurangan anti-negatif',
+                      subtitle:
+                          'Kombinasi penjumlahan & pengurangan anti-negatif',
                       icon: Icons.sync_alt_rounded,
                       category: ProblemCategory.mixed,
                       accentColor: const Color(0xFF9E5738),
@@ -124,10 +127,36 @@ class ModeSelectScreen extends StatelessWidget {
                     _buildModeCard(
                       context,
                       title: 'Perkalian II',
-                      subtitle: 'Multiplicand 4–5 digit × Pengali 2 digit (Carry-heavy)',
+                      subtitle:
+                          'Multiplicand 4–5 digit × Pengali 2 digit (Carry-heavy)',
                       icon: Icons.filter_2_rounded,
                       category: ProblemCategory.multiplication2,
                       accentColor: const Color(0xFF8B5E3C),
+                    ),
+                    _buildModeCard(
+                      context,
+                      title: 'Pembagian I',
+                      subtitle: 'Pembagi 1 digit · Hasil bulat dan habis',
+                      icon: Icons.looks_one_outlined,
+                      category: ProblemCategory.division1,
+                      accentColor: const Color(0xFF4A7C70),
+                    ),
+                    _buildModeCard(
+                      context,
+                      title: 'Pembagian II',
+                      subtitle: 'Pembagi 2 digit · Teknik kepala dan ekor',
+                      icon: Icons.looks_two_outlined,
+                      category: ProblemCategory.division2,
+                      accentColor: const Color(0xFF6C648C),
+                    ),
+                    _buildModeCard(
+                      context,
+                      title: 'Pembagian Desimal',
+                      subtitle:
+                          'Hasil desimal tepat · 1–3 angka di belakang koma',
+                      icon: Icons.calculate_outlined,
+                      category: ProblemCategory.divisionDecimal,
+                      accentColor: const Color(0xFF99674B),
                     ),
                   ],
                 ),

@@ -2,12 +2,15 @@ import 'dart:math';
 import '../models/problem.dart';
 import '../models/soroban_state.dart';
 import 'addition_engine.dart';
+import 'division_engine.dart';
 import 'multiplication_engine.dart';
 import 'multiplication_progress.dart';
 
 /// Generates math problems for Practice and Challenge sessions using Rejection Sampling.
 /// Guarantees that:
-/// - Values fit on 7 rods (<= 9,999,999)
+/// - Standard arithmetic fits on the requested board (normally 7 rods).
+/// - Division has its own fixed-capacity board per category/difficulty, up to
+///   12 rods; its decimal values use exact integer fixed-point arithmetic.
 /// - Intermediate running totals never drop below 0 (non-negative constraint)
 /// - Digits and terms strictly conform to the spec in §3
 class ProblemGenerator {
@@ -42,6 +45,10 @@ class ProblemGenerator {
         return _generateMultiplication1Problem(difficulty, rodCount);
       case ProblemCategory.multiplication2:
         return _generateMultiplication2Problem(difficulty, rodCount);
+      case ProblemCategory.division1:
+      case ProblemCategory.division2:
+      case ProblemCategory.divisionDecimal:
+        return _generateDivisionProblem(category, difficulty);
     }
   }
 
@@ -63,6 +70,35 @@ class ProblemGenerator {
   }
 
   // --- Addition ---
+  Problem _generateDivisionProblem(
+      ProblemCategory category, Difficulty difficulty) {
+    final layout = DivisionEngine.layoutFor(category, difficulty);
+    final oneDigit = category == ProblemCategory.division1 ||
+        category == ProblemCategory.divisionDecimal &&
+            difficulty == Difficulty.easy;
+    for (var attempt = 0; attempt < 10000; attempt++) {
+      final dividend = _randomNDigits(layout.dividendDigits);
+      final divisor =
+          oneDigit ? 2 + _random.nextInt(8) : 10 + _random.nextInt(90);
+      final scaledDividend = dividend * layout.scale;
+      if (scaledDividend % divisor != 0) continue;
+      final result = scaledDividend ~/ divisor;
+      // The decimal level exercises exactly its stated precision. This also
+      // excludes integer results and terminating decimals padded with zeroes.
+      if (category == ProblemCategory.divisionDecimal && result % 10 == 0) {
+        continue;
+      }
+      return const DivisionEngine().createProblem(
+        dividend: dividend,
+        divisor: divisor,
+        category: category,
+        difficulty: difficulty,
+        layout: layout,
+      );
+    }
+    throw StateError('Unable to generate an exact division for this level');
+  }
+
   // Easy: 3 terms x 2 digits
   // Medium: 3 terms x 3 digits
   // Hard: 4 terms x 4 digits

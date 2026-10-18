@@ -586,6 +586,9 @@ class ResultScreen extends StatelessWidget {
       ProblemCategory.mixed => 'Campuran (+ / -)',
       ProblemCategory.multiplication1 => 'Perkalian I (1 Digit)',
       ProblemCategory.multiplication2 => 'Perkalian II (2 Digit)',
+      ProblemCategory.division1 => 'Pembagian I (1 Digit)',
+      ProblemCategory.division2 => 'Pembagian II (2 Digit)',
+      ProblemCategory.divisionDecimal => 'Pembagian Desimal',
     };
   }
 
