@@ -95,7 +95,7 @@ lib/
 │   │   ├── multiplication_engine.dart# Partial product -> AdditionEngine
 │   │   ├── multiplication_progress.dart # Dekomposisi kontribusi + membaca progres dari board
 │   │   ├── problem_generator.dart   # Rejection sampling per kategori & kesulitan
-│   │   └── hint_engine.dart         # getNextHint, getReplay, deteksi divergensi
+│   │   └── hint_engine.dart         # getNextHint, deteksi divergensi
 │   ├── services/
 │   │   └── sound_service.dart       # 4 AudioPool (mediaPlayer) per variasi, mixWithOthers
 │   └── state/

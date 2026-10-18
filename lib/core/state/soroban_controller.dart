@@ -174,6 +174,16 @@ class SorobanController extends ChangeNotifier {
   bool _isAnimating = false;
   bool get isAnimating => _isAnimating;
 
+  /// Test hook for the stuck-lock regression: forces the animation lock on,
+  /// simulating an animation that died without releasing it. A new problem
+  /// or session must clear it anyway (see [_resetToNewProblem]). Production
+  /// code never calls this.
+  @visibleForTesting
+  void debugForceAnimating() {
+    _isAnimating = true;
+    _animatingBeadKey = 'rod_0_heaven';
+  }
+
   /// Currently highlighted bead during chained animation: 'rod_heaven' or 'rod_earth_N'
   String? _animatingBeadKey;
   String? get animatingBeadKey => _animatingBeadKey;
@@ -183,10 +193,21 @@ class SorobanController extends ChangeNotifier {
   final Map<String, DateTime> _trailBeads = {};
   Map<String, DateTime> get trailBeads => Map.unmodifiable(_trailBeads);
 
-  // --- Hint Execution Tracking (for Replay gating) ---
-  /// Tracks the checkpoint index of the last successfully executed hint.
-  /// null means no hint has been executed yet for the current problem/checkpoint.
-  int? _lastHintCheckpointIndex;
+  // --- Hint Execution Tracking (for Replay) ---
+  /// The last successfully executed linear hint, kept whole: Replay re-runs
+  /// exactly this — the board it started from ([HintResult.fromState]) and
+  /// the moves it played — without reading the snapshot chain. Its
+  /// [HintResult.checkpointIndex] is also the position [canReplay] is
+  /// derived from, so the replay data and the replay gate are one record
+  /// and cannot drift apart.
+  HintResult? _lastHint;
+
+  /// Bumped every time a new problem takes the board ([_resetToNewProblem]).
+  /// An animation still running from the replaced problem compares the epoch
+  /// it started with and stops writing once they differ: board, chain and
+  /// lock of the new problem belong to the new problem alone. One mechanism
+  /// for the linear and the multiplication paths alike.
+  int _problemEpoch = 0;
 
   // --- Settings & Records ---
   bool _perRodColor = false;
@@ -373,13 +394,17 @@ class SorobanController extends ChangeNotifier {
   }
 
   void _resetToNewProblem() {
+    _problemEpoch++;
     _state = SorobanState.zero();
     _checkpointSnapshots.clear();
     _checkpointSnapshots.add(SorobanState.zero());
     _activeCheckpointIndex = 0;
     _trailBeads.clear();
+    // A new problem must never inherit a lock or a glow from an animation
+    // that was still running when the old problem was replaced.
+    _isAnimating = false;
     _animatingBeadKey = null;
-    _lastHintCheckpointIndex = null;
+    _lastHint = null;
     _creditedContributions = <int>[];
     _lastMultiplicationHint = null;
     final problem = _currentProblem;
@@ -731,106 +756,140 @@ class SorobanController extends ChangeNotifier {
   @visibleForTesting
   int get checkpointSnapshotCount => _checkpointSnapshots.length;
 
-  /// Replay is only available when a hint has been executed at least once (and not in Challenge Mode).
-  bool get canReplay =>
-      !_isChallengeMode &&
-      !_isAnimating &&
-      _currentProblem != null &&
-      _lastHintCheckpointIndex != null;
+  /// Replay is derived, never tracked: it is available exactly while the
+  /// board still sits on the position the last hint ended at — one
+  /// checkpoint past that hint's own index. The moment another checkpoint
+  /// is crossed (manually or by hinting again) the index moves away and
+  /// Replay goes dark; a Reset that lands the board back on the post-hint
+  /// position lights it up again. There is no second flag to invalidate and
+  /// therefore none to desync. Not available in Challenge Mode; the UI adds
+  /// its own `!isAnimating` gate on top.
+  bool get canReplay {
+    if (_isChallengeMode || _currentProblem == null) return false;
+    if (_multiplication != null) {
+      final hint = _lastMultiplicationHint;
+      return hint != null &&
+          _activeCheckpointIndex == hint.baseOrder.length + 1;
+    }
+    final hint = _lastHint;
+    return hint != null &&
+        _activeCheckpointIndex == hint.checkpointIndex + 1;
+  }
 
   // --- Hint Execution (Chained Animation) ---
   Future<void> executeHint() async {
     if (_isChallengeMode || _isAnimating || _currentProblem == null) return;
 
+    final epoch = _problemEpoch;
     final multiplication = _multiplication;
     if (multiplication != null) {
-      await _executeMultiplicationHint(multiplication);
+      await _executeMultiplicationHint(multiplication, epoch);
       return;
     }
 
+    final problem = _currentProblem!;
     final hintResult = hintEngine.getNextHint(
       currentState: _state,
-      problem: _currentProblem!,
+      problem: problem,
       checkpointSnapshots: _checkpointSnapshots,
+      activeCheckpointIndex: _activeCheckpointIndex,
     );
 
     if (hintResult == null) return;
 
     _clackPending = false;
     _isAnimating = true;
-    notifyListeners();
+    try {
+      notifyListeners();
 
-    // If recovering from divergence, restore valid snapshot gradually rod-by-rod
-    if (hintResult.recoveredFromDivergence) {
-      await _smoothRecoverDivergence(hintResult.fromState);
+      // If recovering from divergence, restore valid snapshot gradually rod-by-rod
+      if (hintResult.recoveredFromDivergence) {
+        await _smoothRecoverDivergence(hintResult.fromState, epoch);
+        if (_problemEpoch != epoch) return;
+      }
+
+      // Brief pause before starting the hint animation so user notices it's about to begin
+      await Future.delayed(const Duration(milliseconds: 400));
+
+      await _playChainedMoves(hintResult.moves, epoch);
+
+      // The problem was replaced while the hint was playing: none of it applies.
+      if (_problemEpoch != epoch) return;
+
+      // Track hint execution for Replay: the whole result, so Replay re-runs
+      // this exact animation and canReplay derives from this exact position.
+      _lastHint = hintResult;
+
+      // Same bookkeeping as a manual gesture, so the chain can never end up with
+      // a hole no matter which path advanced it.
+      _recordProgressThrough(hintResult.checkpointIndex);
+
+      if (_activeCheckpointIndex >= problem.checkpoints.length) {
+        _handleProblemCompleted();
+      }
+    } finally {
+      // The lock never outlives its animation, whatever happened inside it.
+      // A replaced problem cleared it already (and may have handed it to a
+      // new animation), so only the owner of the current epoch releases it.
+      if (_problemEpoch == epoch) {
+        _animatingBeadKey = null;
+        _isAnimating = false;
+      }
+      notifyListeners();
     }
-
-    // Brief pause before starting the hint animation so user notices it's about to begin
-    await Future.delayed(const Duration(milliseconds: 400));
-
-    await _playChainedMoves(hintResult.moves);
-
-    // Track hint execution for Replay gating
-    _lastHintCheckpointIndex = hintResult.checkpointIndex;
-
-    // Same bookkeeping as a manual gesture, so the chain can never end up with
-    // a hole no matter which path advanced it.
-    _recordProgressThrough(hintResult.checkpointIndex);
-    _animatingBeadKey = null;
-    _isAnimating = false;
-
-    if (_activeCheckpointIndex >= _currentProblem!.checkpoints.length) {
-      _handleProblemCompleted();
-    }
-
-    notifyListeners();
   }
 
   // --- Replay Execution ---
+  /// Re-runs the last hint's own animation from the board that hint started
+  /// at. Gated by [canReplay] as its very first check, so it only runs while
+  /// the board still sits on the post-hint position: Replay never rewinds a
+  /// checkpoint the user has since crossed, and it never lowers
+  /// [activeCheckpointIndex] — the chain entry it records is one the chain
+  /// already has.
   Future<void> executeReplay() async {
-    if (_isChallengeMode || _isAnimating || _currentProblem == null) return;
-    if (_currentProblem!.checkpoints.isEmpty) return;
-    if (_lastHintCheckpointIndex == null) return;
+    if (_isAnimating || !canReplay) return;
 
+    final epoch = _problemEpoch;
     final multiplication = _multiplication;
     if (multiplication != null) {
-      await _replayMultiplicationHint(multiplication);
+      await _replayMultiplicationHint(multiplication, epoch);
       return;
     }
 
-    final replayIdx = _lastHintCheckpointIndex!;
-
-    final replayResult = hintEngine.getReplay(
-      activeCheckpointIndex: replayIdx,
-      problem: _currentProblem!,
-      checkpointSnapshots: _checkpointSnapshots,
-    );
-
-    if (replayResult == null) return;
+    final hint = _lastHint!;
 
     _clackPending = false;
     _isAnimating = true;
-    // 1. Rollback to state before this digit
-    _state = replayResult.fromState.clone();
-    _activeCheckpointIndex = replayIdx;
-    notifyListeners();
+    try {
+      // 1. Rollback to the board the hinted digit started at. Beads the user
+      //    moved partially since are undone with it — accepted by design:
+      //    Replay exists to re-watch the animation, not to preserve edits
+      //    made on top of it.
+      _state = hint.fromState.clone();
+      notifyListeners();
 
-    await Future.delayed(const Duration(milliseconds: 1200));
+      await Future.delayed(const Duration(milliseconds: 1200));
 
-    // 2. Play chained animation again
-    await _playChainedMoves(replayResult.moves);
+      // 2. Play chained animation again
+      await _playChainedMoves(hint.moves, epoch);
 
-    // Replay re-runs one digit that was already hinted, so the chain already
-    // covers this index; recording it again just refreshes the board.
-    _recordProgressThrough(replayIdx);
-    _animatingBeadKey = null;
-    _isAnimating = false;
+      // The problem was replaced while the replay was playing.
+      if (_problemEpoch != epoch) return;
 
-    if (_activeCheckpointIndex >= _currentProblem!.checkpoints.length) {
-      _handleProblemCompleted();
+      // Replay re-runs one digit that was already hinted, so the chain already
+      // covers this index; recording it again just refreshes the board.
+      _recordProgressThrough(hint.checkpointIndex);
+
+      if (_activeCheckpointIndex >= _currentProblem!.checkpoints.length) {
+        _handleProblemCompleted();
+      }
+    } finally {
+      if (_problemEpoch == epoch) {
+        _animatingBeadKey = null;
+        _isAnimating = false;
+      }
+      notifyListeners();
     }
-
-    notifyListeners();
   }
 
   /// Hint for a multiplication: read from the board, so it continues the route
@@ -838,6 +897,7 @@ class SorobanController extends ChangeNotifier {
   /// [HintEngine.getNextMultiplicationHint].
   Future<void> _executeMultiplicationHint(
     MultiplicationProgress multiplication,
+    int epoch,
   ) async {
     final hint = hintEngine.getNextMultiplicationHint(
       currentState: _state,
@@ -848,76 +908,76 @@ class SorobanController extends ChangeNotifier {
 
     _clackPending = false;
     _isAnimating = true;
-    notifyListeners();
-
-    // Only a board that is no accumulation of contributions at all gets here
-    // with a recovery, and it goes back to the user's own last valid board.
-    if (hint.recoveredFromDivergence) {
-      await _smoothRecoverDivergence(hint.fromState);
-    }
-
-    // Brief pause before starting the hint animation so user notices it's about to begin
-    await Future.delayed(const Duration(milliseconds: 400));
-
-    await _playChainedMoves(hint.moves);
-
-    if (!identical(_multiplication, multiplication)) {
-      // The problem was replaced while the hint was playing: none of it applies.
-      _animatingBeadKey = null;
-      _isAnimating = false;
+    try {
       notifyListeners();
-      return;
+
+      // Only a board that is no accumulation of contributions at all gets here
+      // with a recovery, and it goes back to the user's own last valid board.
+      if (hint.recoveredFromDivergence) {
+        await _smoothRecoverDivergence(hint.fromState, epoch);
+        if (_problemEpoch != epoch) return;
+      }
+
+      // Brief pause before starting the hint animation so user notices it's about to begin
+      await Future.delayed(const Duration(milliseconds: 400));
+
+      await _playChainedMoves(hint.moves, epoch);
+
+      // The problem was replaced while the hint was playing: none of it applies.
+      if (_problemEpoch != epoch) return;
+
+      _lastMultiplicationHint = hint;
+      _creditContributions([...hint.baseOrder, hint.contribution.index]);
+
+      if (_isMultiplicationSolved(multiplication)) {
+        _handleProblemCompleted();
+      }
+    } finally {
+      if (_problemEpoch == epoch) {
+        _animatingBeadKey = null;
+        _isAnimating = false;
+      }
+      notifyListeners();
     }
-
-    _lastMultiplicationHint = hint;
-    _creditContributions([...hint.baseOrder, hint.contribution.index]);
-    _lastHintCheckpointIndex = _activeCheckpointIndex - 1;
-    _animatingBeadKey = null;
-    _isAnimating = false;
-
-    if (_isMultiplicationSolved(multiplication)) {
-      _handleProblemCompleted();
-    }
-
-    notifyListeners();
   }
 
   /// Replays the last multiplication hint: board and credit go back to where it
   /// started, then its moves play again.
   Future<void> _replayMultiplicationHint(
     MultiplicationProgress multiplication,
+    int epoch,
   ) async {
     final hint = _lastMultiplicationHint;
     if (hint == null) return;
 
     _clackPending = false;
     _isAnimating = true;
-    // 1. Rollback to the board before this contribution
-    _creditContributions(hint.baseOrder);
-    _state = hint.fromState.clone();
-    notifyListeners();
-
-    await Future.delayed(const Duration(milliseconds: 1200));
-
-    // 2. Play chained animation again
-    await _playChainedMoves(hint.moves);
-
-    if (!identical(_multiplication, multiplication)) {
-      _animatingBeadKey = null;
-      _isAnimating = false;
+    try {
+      // 1. Rollback to the board before this contribution
+      _creditContributions(hint.baseOrder);
+      _state = hint.fromState.clone();
       notifyListeners();
-      return;
+
+      await Future.delayed(const Duration(milliseconds: 1200));
+
+      // 2. Play chained animation again
+      await _playChainedMoves(hint.moves, epoch);
+
+      // The problem was replaced while the replay was playing.
+      if (_problemEpoch != epoch) return;
+
+      _creditContributions([...hint.baseOrder, hint.contribution.index]);
+
+      if (_isMultiplicationSolved(multiplication)) {
+        _handleProblemCompleted();
+      }
+    } finally {
+      if (_problemEpoch == epoch) {
+        _animatingBeadKey = null;
+        _isAnimating = false;
+      }
+      notifyListeners();
     }
-
-    _creditContributions([...hint.baseOrder, hint.contribution.index]);
-    _animatingBeadKey = null;
-    _isAnimating = false;
-
-    if (_isMultiplicationSolved(multiplication)) {
-      _handleProblemCompleted();
-    }
-
-    notifyListeners();
   }
 
   // --- Reset Execution ---
@@ -949,9 +1009,11 @@ class SorobanController extends ChangeNotifier {
       _state = _checkpointSnapshots.last.clone();
       _trailBeads.clear();
       _animatingBeadKey = null;
-      // Reset hint tracking when going back to a previous checkpoint
-      _lastHintCheckpointIndex = null;
-      _lastMultiplicationHint = null;
+      // The stored hints are NOT cleared here: canReplay is derived from
+      // where the board sits relative to them, so stepping back below the
+      // post-hint position already darkens Replay, while a Reset that lands
+      // the board back on that very position (undoing a manual advance)
+      // keeps Replay available — the board really is where the hint left it.
       notifyListeners();
     }
   }
@@ -960,7 +1022,10 @@ class SorobanController extends ChangeNotifier {
   /// with brass glow and delay, so the user can see exactly which rods were wrong.
   /// After all rods are restored, an extra pause gives the user time to register
   /// the correct position before the hint animation begins.
-  Future<void> _smoothRecoverDivergence(SorobanState validState) async {
+  Future<void> _smoothRecoverDivergence(
+    SorobanState validState,
+    int epoch,
+  ) async {
     final totalRods = _state.rods.length;
 
     // Collect indices of rods that differ from the valid state
@@ -973,6 +1038,7 @@ class SorobanController extends ChangeNotifier {
 
     if (divergentRods.isEmpty) {
       // No divergence, just set the state
+      if (_problemEpoch != epoch) return;
       _state = validState.clone();
       notifyListeners();
       return;
@@ -980,6 +1046,9 @@ class SorobanController extends ChangeNotifier {
 
     // Restore each divergent rod one at a time with visual feedback
     for (int i = 0; i < divergentRods.length; i++) {
+      // The problem was replaced mid-recovery: stop touching the board.
+      if (_problemEpoch != epoch) return;
+
       final rodIdx = divergentRods[i];
       final validRod = validState.rods[rodIdx];
 
@@ -998,6 +1067,7 @@ class SorobanController extends ChangeNotifier {
       await Future.delayed(const Duration(milliseconds: 300));
     }
 
+    if (_problemEpoch != epoch) return;
     _animatingBeadKey = null;
     notifyListeners();
 
@@ -1007,8 +1077,11 @@ class SorobanController extends ChangeNotifier {
   }
 
   /// Plays a sequence of atomic moves with brass glow and inter-move delay.
-  Future<void> _playChainedMoves(List<BeadMove> moves) async {
+  Future<void> _playChainedMoves(List<BeadMove> moves, int epoch) async {
     for (int i = 0; i < moves.length; i++) {
+      // The problem was replaced mid-animation: stop touching the board.
+      if (_problemEpoch != epoch) return;
+
       final move = moves[i];
       final key = move.kind == BeadKind.heaven
           ? 'rod_${move.rodIndex}_heaven'
@@ -1023,7 +1096,7 @@ class SorobanController extends ChangeNotifier {
 
       await Future.delayed(move.delay);
     }
-    _animatingBeadKey = null;
+    if (_problemEpoch == epoch) _animatingBeadKey = null;
   }
 
   @override

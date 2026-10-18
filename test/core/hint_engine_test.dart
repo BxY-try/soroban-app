@@ -22,6 +22,7 @@ void main() {
         currentState: SorobanState.zero(),
         problem: problem,
         checkpointSnapshots: snapshots,
+        activeCheckpointIndex: 0,
       );
 
       expect(hint1, isNotNull);
@@ -38,34 +39,11 @@ void main() {
         currentState: state1,
         problem: problem,
         checkpointSnapshots: snapshots,
+        activeCheckpointIndex: 1,
       );
 
       expect(hint2, isNotNull);
       expect(hint2!.checkpointIndex, equals(1));
-    });
-
-    test('Replay rolls back to start of active checkpoint', () {
-      final problem = generator.generateProblem(
-        category: ProblemCategory.addition,
-        difficulty: Difficulty.easy,
-      );
-
-      final cp0Target = problem.checkpoints[0].targetValue;
-      final snapshots = [
-        SorobanState.zero(),
-        SorobanState.fromValue(cp0Target),
-      ];
-
-      // Replay checkpoint 0
-      final replay = hintEngine.getReplay(
-        activeCheckpointIndex: 0,
-        problem: problem,
-        checkpointSnapshots: snapshots,
-      );
-
-      expect(replay, isNotNull);
-      expect(replay!.fromState.value, equals(0));
-      expect(replay.checkpoint.targetValue, equals(cp0Target));
     });
 
     test('Divergence ("Nyasar") recovery restores to valid checkpoint snapshot', () {
@@ -87,6 +65,7 @@ void main() {
         currentState: arbitraryLostState,
         problem: problem,
         checkpointSnapshots: snapshots,
+        activeCheckpointIndex: 1,
       );
 
       expect(hint, isNotNull);

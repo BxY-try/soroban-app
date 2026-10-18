@@ -178,9 +178,120 @@ void main() {
     expect(find.byType(SorobanView), findsOneWidget);
     expect(find.byIcon(Icons.restart_alt_rounded), findsOneWidget);
     expect(find.byIcon(Icons.lightbulb_rounded), findsOneWidget);
-    expect(find.byIcon(Icons.repeat_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
     // Problem text now uses Text.rich with per-digit dimmed style (no '=' sign)
     expect(find.byType(RichText), findsWidgets);
+  });
+
+  testWidgets(
+      'PracticeScreen problem text tracks the abacus FRAME centre, like Challenge',
+      (tester) async {
+    final controller = SorobanController();
+    controller.startPracticeProblem(ProblemCategory.addition, Difficulty.easy);
+    addTearDown(() => controller.dispose());
+
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const PracticeScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // 1. The practice controls live in the left panel, to the left of the
+    //    Soroban — same side as the challenge's timer/reset badges.
+    final sorobanLeft = tester.getTopLeft(find.byType(SorobanView)).dx;
+    final hintCenter =
+        tester.getCenter(find.byIcon(Icons.lightbulb_rounded)).dx;
+    final replayCenter = tester.getCenter(find.byIcon(Icons.play_arrow_rounded)).dx;
+    final retrialCenter =
+        tester.getCenter(find.byIcon(Icons.restart_alt_rounded)).dx;
+    expect(hintCenter < sorobanLeft, isTrue);
+    expect(replayCenter < sorobanLeft, isTrue);
+    expect(retrialCenter < sorobanLeft, isTrue);
+
+    // 2. The equation sits on the painted abacus frame centre, sourced from
+    //    the same ExerciseLayout helper the challenge screen uses. Long
+    //    equations shrink via FittedBox instead of moving this centre.
+    final sorobanBox = tester.getRect(find.byType(SorobanView));
+    final abacusLayout = SorobanLayout(
+      size: sorobanBox.size,
+      totalRods: controller.state.rods.length,
+    );
+    final frameCenter = sorobanBox.left + abacusLayout.frameRect.center.dx;
+    final problemCenter =
+        tester.getCenter(find.byKey(const Key('practice_problem_text'))).dx;
+
+    expect((frameCenter - problemCenter).abs() < 1.0, isTrue,
+        reason: 'text should be centred on the painted abacus frame');
+  });
+
+  testWidgets(
+      'PracticeScreen disables Putar Ulang button while executeReplay is running',
+      (tester) async {
+    final controller = controllerForSum([4, 5]);
+    addTearDown(() => controller.dispose());
+
+    tester.view.physicalSize = const Size(1280, 720);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() => tester.view.resetPhysicalSize());
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: controller,
+        child: MaterialApp(
+          theme: SorobanTheme.themeData,
+          home: const PracticeScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // Execute hint for checkpoint 0
+    controller.executeHint();
+
+    // Advance time through the 400ms initial delay
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // Advance time through the chained moves (each move has ~550ms delay)
+    await tester.pump(const Duration(milliseconds: 600));
+
+    // Now the hint should be complete, check canReplay
+    expect(controller.canReplay, isTrue);
+    expect(controller.isAnimating, isFalse);
+
+    // Verify replay button is enabled before triggering replay
+    final replayButton = find.byIcon(Icons.play_arrow_rounded);
+    final inkWellBefore = tester.widget<InkWell>(
+      find.ancestor(of: replayButton, matching: find.byType(InkWell)).first,
+    );
+    expect(inkWellBefore.onTap, isNotNull);
+
+    // Trigger replay
+    controller.executeReplay();
+
+    // Pump once to start the replay (enters the 1200ms delay)
+    await tester.pump();
+
+    // During replay, the button should be disabled (isAnimating = true)
+    final replayButtonDuringReplay = find.byIcon(Icons.play_arrow_rounded);
+    final inkWellDuring = tester.widget<InkWell>(
+      find.ancestor(of: replayButtonDuringReplay, matching: find.byType(InkWell)).first,
+    );
+    expect(inkWellDuring.onTap, isNull);
+
+    // Advance time through the replay (1200ms delay + animation)
+    await tester.pump(const Duration(milliseconds: 2000));
+
+    // After replay completes, button should be enabled again
+    expect(controller.isAnimating, isFalse);
   });
 
   testWidgets(
